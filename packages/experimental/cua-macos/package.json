@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-experimental-cua-macos",
   "description": "macOS native provider for shared Computer Use application and window objects",
-  "version": "0.2.1-rc.2",
+  "version": "0.2.1-rc.2.nosandbox",
   "publishConfig": {
     "access": "public"
   },
@@ -71,8 +71,6 @@
     "@deepseek-ai/dsh-fs-local": "workspace:*",
     "@deepseek-ai/dsh-llm-deepseek": "workspace:*",
     "@deepseek-ai/dsh-ptc-runtime-node": "workspace:*",
-    "@deepseek-ai/dsh-sandbox-local": "workspace:*",
-    "@deepseek-ai/dsh-sandbox-policy": "workspace:*",
     "sharp": "^0.35.3",
     "@deepseek-ai/dsh-ptc-runtime": "workspace:*",
     "@deepseek-ai/dsh-user-questions": "workspace:*",

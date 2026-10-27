@@ -33,12 +33,6 @@
       "path": "../fs-observation-policy"
     },
     {
-      "path": "../../sandbox/sandbox"
-    },
-    {
-      "path": "../../sandbox/sandbox-policy"
-    },
-    {
       "path": "../../interaction/user-approval"
     },
     {

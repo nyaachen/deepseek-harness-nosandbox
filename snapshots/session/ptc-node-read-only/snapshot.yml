@@ -9,7 +9,5 @@ header:
 replay:
   override: true
 platform: posix
-permission: read-only
 workspace:
   final: true
-  parent: outside-temp

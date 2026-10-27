@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-Run the SSH helper on a remote machine without installing Node or npm packages. Each archive includes the executable, its native resources and integrity metadata. The private carrier supports managed processes, terminals, sandboxing and an embedded PTC worker through the existing SSH providers. Project commands still use the remote machine’s own development tools.
+Run the SSH helper on a remote machine without installing Node or npm packages. Each archive includes the executable, its native resources and integrity metadata. The private carrier supports managed processes, terminals and an embedded PTC worker through the existing SSH providers. Project commands still use the remote machine’s own development tools.
 
 ## Table of Contents
 
@@ -92,7 +92,7 @@ The carrier adds no request-prefix content.
 
 <a id="known-limitations-and-deferred-work"></a>
 
-- Windows and musl-based Linux are not build targets. Sandbox availability still depends on the target kernel and system tools.
+- Windows and musl-based Linux are not build targets.
 - Automatic download, deployment, updates and connection UI are separate from archive production.
 - The executable accepts private worker invocations, not arbitrary Node CLI arguments. Project `node` commands and nested JavaScript subprocesses need their own Node installation.
 

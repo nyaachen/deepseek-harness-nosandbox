@@ -683,11 +683,11 @@ describe('MessageItem arms', () => {
       <MessageItem t={t} node={{
         kind: 'context',
         seq: 3,
-        content: [{ type: 'text', text: 'Current runtime context.\n\nsandbox\n\nworkspace' }],
+        content: [{ type: 'text', text: 'Current runtime context.\n\nworking-directory:current\n\ntime-context' }],
         source: {
           kind: 'runtime-context',
           form: 'snapshot',
-          sections: [{ name: 'sandbox:policy', text: 'workspace-write' }, { name: 'workspace', text: '/repo' }],
+          sections: [{ name: 'working-directory:current', text: '/repo' }, { name: 'time-context', text: '2026-10-23' }],
         },
         producer: { role: 'inject', label: '@deepseek-ai/dsh-system-prompt' },
         form: 'snapshot',
@@ -696,7 +696,7 @@ describe('MessageItem arms', () => {
     )
     fireEvent.click(view.getByRole('button', { name: /^上下文注入\s*@deepseek-ai\/dsh-system-prompt$/ }))
     const rows = [...view.container.querySelectorAll('[data-context-sections] div')].map(node => node.textContent)
-    expect(rows).toEqual(['sandbox:policyworkspace-write', 'workspace/repo'])
+    expect(rows).toEqual(['working-directory:current/repo', 'time-context2026-10-23'])
   })
 
   it('a notice puts its account on the collapsed row', () => {
@@ -760,7 +760,7 @@ describe('MessageItem arms', () => {
     const view = render(
       <MessageItem t={t} node={{
         kind: 'context', seq: 3, content: [{ type: 'text', text: 'Current runtime context.' }],
-        source: { kind: 'plugin', form: 'snapshot', sections: [{ name: 'sandbox', text: 'w' }] },
+        source: { kind: 'plugin', form: 'snapshot', sections: [{ name: 'time-context', text: 'w' }] },
         producer: { role: 'inject', label: 'plugin' },
         form: 'snapshot',
       } as never}

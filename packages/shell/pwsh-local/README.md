@@ -1,5 +1,5 @@
 ---
-description: "The local PowerShell executor for deployments and maintainers choosing, configuring, or debugging unconfined PowerShell command execution over the shell seam."
+description: "The local PowerShell executor for deployments and maintainers choosing, configuring, or debugging PowerShell command execution over the shell seam."
 kind: "package-reference"
 ---
 
@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-`dsh-pwsh-local` is the PowerShell executor: every command runs as a fresh, non-interactive `pwsh -Command` process with no profile files, so no shell state survives between calls. It mirrors `dsh-bash-local`'s semantics call-for-call and adds PowerShell-shaped concerns: executable resolution, UTF-8 output pinning, and the model-friendly terminal environment. Commands run with the harness process's own authority — this executor confines nothing; compose `dsh-pwsh-sandbox` when commands need the sandbox capability. The model-facing `pwsh` tool talks to it once it is mounted.
+`dsh-pwsh-local` is the PowerShell executor: every command runs as a fresh, non-interactive `pwsh -Command` process with no profile files, so no shell state survives between calls. It mirrors `dsh-bash-local`'s semantics call-for-call and adds PowerShell-shaped concerns: executable resolution, UTF-8 output pinning, and the model-friendly terminal environment. Commands run with the harness process's own authority — this executor applies no policy of its own. The model-facing `pwsh` tool talks to it once it is mounted.
 
 ## Table of Contents
 
@@ -25,11 +25,11 @@ English | [中文](README.zh.md)
 <a id="use-this-package"></a>
 ## Use this package
 
-Mount this executor when a composition needs PowerShell command execution — typically on Windows — without confinement. It registers as `ctx.shell`, and the model-facing `pwsh` tool works over it immediately: an agent calls the tool, and the command runs as a fresh `pwsh -Command` process with the budgets below.
+Mount this executor when a composition needs PowerShell command execution — typically on Windows. It registers as `ctx.shell`, and the model-facing `pwsh` tool works over it immediately: an agent calls the tool, and the command runs as a fresh `pwsh -Command` process with the budgets below.
 
 ### When to choose it
 
-It is the Windows counterpart of `dsh-bash-local`: choose it where `pwsh` is the platform shell, so a composition can swap the POSIX rows for the pwsh rows and keep the same semantics. The executor resolves the `pwsh` executable from an explicit `pwshPath`, well-known Windows install locations, PATH entries, or Windows PowerShell 5.1 as a last resort. For unconfined execution it is the default; compose `dsh-pwsh-sandbox` when commands need the sandbox capability.
+It is the Windows counterpart of `dsh-bash-local`: choose it where `pwsh` is the platform shell, so a composition can swap the POSIX rows for the pwsh rows and keep the same semantics. The executor resolves the `pwsh` executable from an explicit `pwshPath`, well-known Windows install locations, PATH entries, or Windows PowerShell 5.1 as a last resort. It is the default executor wherever `pwsh` is the platform shell.
 
 ### Minimal configuration
 
@@ -116,11 +116,10 @@ The foreground deadline starts before argv preparation and retains the same sign
 <a id="further-exploration"></a>
 ## Further Exploration
 
-Read these pages when the executor contract is not enough. They move from the seam to the confining sibling and the PowerShell tool.
+Read these pages when the executor contract is not enough. They move from the seam to the PowerShell tool and the mechanics underneath.
 
 - [shell seam](../shell/README.md) — the executor contract this provider implements, including the request/spec split.
 - [bash-local](../bash-local/README.md) — the POSIX counterpart this executor mirrors call-for-call.
-- [pwsh-sandbox](../pwsh-sandbox/README.md) — the confining executor to compose instead when commands need the sandbox capability.
 - [tool-pwsh](../tool-pwsh/README.md) — the model-facing `pwsh` tool over this executor.
 - [Bash executor subsystem](../../../docs/subsystems/shell.md) — request/spec vocabulary, results, and the service contract in full.
 
@@ -142,7 +141,7 @@ No direct invalidation; the named consumer owns any request-prefix changes.
 
 These limits define when this executor is a poor fit. They are current package constraints, not a roadmap.
 
-- **Unconfined by itself** — commands run with the harness process's authority; deployments needing confinement compose a sandboxing executor or policy instead.
+- **No policy layer of its own** — commands run with the harness process's authority; per-call allow/deny/ask policy belongs on the tools' `pre-execute` waterfall.
 - **No persistent shell or PTY** — every call starts a fresh `pwsh -Command`.
 - **The command string is PowerShell text** — the `-Command` domain has no shell-quoting layer, but a model-facing command is parsed by PowerShell itself, so PowerShell syntax errors are command failures, not launch failures.
 - **A background provider-failure note is the whole stderr stream** — `SubprocessHandle.done` can reject before or after target execution begins, and the subprocess service buffers no output for a target that never reported, so the executor serves the stage-neutral `subprocess failed before reporting an outcome: …` as the observed stderr stream (offset readers re-read it at their own offsets) and folds it into exactly one `readOutput()` delta; a consuming reader that discards that delta recovers it only through `observed.stderr`.

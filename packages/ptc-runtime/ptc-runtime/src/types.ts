@@ -6,8 +6,6 @@
  * @module @deepseek-ai/dsh-ptc-runtime/src/types
  */
 
-import type { SandboxEnforcement, SandboxExecutionPolicy, SandboxMode } from '@deepseek-ai/dsh-sandbox'
-
 /**
  * One host-side function exposed to the program as an async callable. The
  * runtime bridges calls to it (possibly across a serialization boundary), so
@@ -94,8 +92,6 @@ export interface PtcRunRequest {
    * null requests no deadline. Providers validate and cap numeric budgets or reject unsupported choices.
    */
   timeoutMs?: number | null
-  /** Resolved authority for this execution. Providers without confinement reject an explicit policy. */
-  sandboxPolicy?: SandboxExecutionPolicy
   /**
    * Abort the run: the runtime stops the program (hard, even mid-loop) and
    * resolves with a {@link PtcRunFailure} of kind `'abort'`. In-flight
@@ -112,16 +108,6 @@ export interface PtcRunSpec extends PtcRunRequest {
   timeoutMs: number | null
 }
 
-/** File confinement applied to a program, independently of its terminal outcome. */
-export interface PtcRunSandbox {
-  /** File-effect mode used for this execution. */
-  mode: SandboxMode
-  /** Program failure text matched backend diagnostics; not enforcement proof or an exhaustive denial record. */
-  denied: boolean
-  /** Completeness reported by the selected confining backend; absent for full access. */
-  enforcement?: SandboxEnforcement
-}
-
 /**
  * Why a run failed. The kinds are orthogonal outcomes reported independently
  * (per docs/defensive-patterns/general.md): a budget expiry is not an exception, an
@@ -134,11 +120,10 @@ export interface PtcRunSandbox {
  * - `'invalid-output'` — the completion value was not lossless JSON.
  * - `'output-limit'` — the serialized outer logs/value/diagnostic exceeded the configured cap.
  * - `'protocol'` — the program sent invalid or over-budget control traffic.
- * - `'sandbox-unavailable'` — required confinement could not be established.
  */
 export interface PtcRunFailure {
   /** The failure class (see the interface doc for each kind's meaning). */
-  kind: 'exception' | 'timeout' | 'abort' | 'worker-exit' | 'invalid-output' | 'output-limit' | 'protocol' | 'sandbox-unavailable'
+  kind: 'exception' | 'timeout' | 'abort' | 'worker-exit' | 'invalid-output' | 'output-limit' | 'protocol'
   /** Human-readable detail, suitable for feeding back to a model to self-correct. */
   message: string
 }
@@ -149,8 +134,6 @@ export interface PtcRunFailure {
  * an exception path.
  */
 export interface PtcRunResult {
-  /** Applied file policy and observed denial, when the provider enforces file policy. */
-  sandbox?: PtcRunSandbox
   /**
    * The program's completion value (a return or final REPL expression), when it ran to
    * completion and the value crossed the runtime's lossless-JSON boundary.

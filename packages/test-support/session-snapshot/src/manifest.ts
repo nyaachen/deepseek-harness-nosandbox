@@ -38,17 +38,12 @@ export interface SnapshotReplayManifest {
 /** Host requirements for a scenario's process-level controller. */
 export type SnapshotPlatform = 'posix' | 'pwsh'
 
-/** Deployment permission preset selected before the scenario starts. */
-export type SnapshotPermission = 'read-only' | 'workspace-write' | 'danger-full-access'
-
 /** Scenario-local workspace preparation and expected-state metadata. */
 export interface SnapshotWorkspaceManifest {
   /** Named setup needed for state Git cannot represent directly. */
   setup?: string
   /** Whether `workspace.expected/` owns the complete final world state. */
   final?: true
-  /** Place the generated cwd outside automatically writable temporary roots. */
-  parent?: 'outside-temp'
 }
 
 /** Controller input that cannot enter a session because admission rejects it. */
@@ -110,8 +105,6 @@ export interface SnapshotManifest {
   replay?: SnapshotReplayManifest
   /** Optional host requirement; portable scenarios omit it. */
   platform?: SnapshotPlatform
-  /** Explicit process fallback permission preset. */
-  permission?: SnapshotPermission
   /** Test-only string environment additions needed by the declared composition. */
   environment?: Record<string, string>
   /** Workspace setup and external final-state ownership. */
@@ -146,7 +139,6 @@ export function writesCurrentSessionFixtures(
 const PROFILES = new Set<SnapshotProfile>(['headless', 'sdk', 'sdk-minimal', 'acp', 'web'])
 const RECORDINGS = new Set<SnapshotRecording>(['live', 'authored'])
 const PLATFORMS = new Set<SnapshotPlatform>(['posix', 'pwsh'])
-const PERMISSIONS = new Set<SnapshotPermission>(['read-only', 'workspace-write', 'danger-full-access'])
 const SESSION_FORMAT_COVERAGE = new Set<SnapshotSessionFormatCoverage>([
   'multi-hop',
   'packed-row',
@@ -217,7 +209,6 @@ export function parseSnapshotManifest(source: string, path = 'snapshot.yml'): Sn
       'header',
       'replay',
       'platform',
-      'permission',
       'environment',
       'workspace',
       'input',
@@ -298,14 +289,6 @@ export function parseSnapshotManifest(source: string, path = 'snapshot.yml'): Sn
       platform = root.platform as SnapshotPlatform
     }
 
-    let permission: SnapshotPermission | undefined
-    if (root.permission !== undefined) {
-      if (typeof root.permission !== 'string' || !PERMISSIONS.has(root.permission as SnapshotPermission)) {
-        throw new Error('manifest.permission must be read-only, workspace-write, or danger-full-access')
-      }
-      permission = root.permission as SnapshotPermission
-    }
-
     let environment: Record<string, string> | undefined
     if (root.environment !== undefined) {
       const value = record(root.environment, 'manifest.environment')
@@ -318,17 +301,13 @@ export function parseSnapshotManifest(source: string, path = 'snapshot.yml'): Sn
     let workspace: SnapshotWorkspaceManifest | undefined
     if (root.workspace !== undefined) {
       const value = record(root.workspace, 'manifest.workspace')
-      exactKeys(value, ['setup', 'final', 'parent'], 'manifest.workspace')
+      exactKeys(value, ['setup', 'final'], 'manifest.workspace')
       if (value.final !== undefined && value.final !== true) {
         throw new Error('manifest.workspace.final must equal true when present')
-      }
-      if (value.parent !== undefined && value.parent !== 'outside-temp') {
-        throw new Error('manifest.workspace.parent must equal outside-temp')
       }
       workspace = {
         ...(value.setup === undefined ? {} : { setup: name(value.setup, 'manifest.workspace.setup') }),
         ...(value.final === true ? { final: true as const } : {}),
-        ...(value.parent === 'outside-temp' ? { parent: 'outside-temp' as const } : {}),
       }
       if (Object.keys(workspace).length === 0) throw new Error('manifest.workspace must not be empty')
     }
@@ -418,7 +397,6 @@ export function parseSnapshotManifest(source: string, path = 'snapshot.yml'): Sn
       ...(header === undefined ? {} : { header }),
       ...(replay === undefined ? {} : { replay }),
       ...(platform === undefined ? {} : { platform }),
-      ...(permission === undefined ? {} : { permission }),
       ...(environment === undefined ? {} : { environment }),
       ...(workspace === undefined ? {} : { workspace }),
       ...(input === undefined ? {} : { input }),

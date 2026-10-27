@@ -32,9 +32,6 @@ const controllerCases: readonly {
   { name: 'reject-extra-dirs', hasModelTurn: false },
   { name: 'cancel', hasModelTurn: true },
   { name: 'cancel-tool-calls', hasModelTurn: true },
-  { name: 'escalation-approved', hasModelTurn: true },
-  { name: 'escalation-rejected', hasModelTurn: true },
-  { name: 'fs-escalation-approved', hasModelTurn: true },
   { name: 'fs-same-mode', hasModelTurn: true },
   {
     name: 'image-compaction',
@@ -68,14 +65,7 @@ const scenarios: Scenario[] = controllerCases.map((controller) => {
     ...(manifest.platform === 'posix' ? { posixOnly: true } : {}),
     ...(manifest.platform === 'pwsh' ? { pwshOnly: true } : {}),
     ...(controller.configPath === undefined ? {} : { configPath: controller.configPath }),
-    ...manifest.permission === undefined && manifest.environment === undefined
-      ? {}
-      : {
-          env: {
-            ...manifest.environment,
-            ...(manifest.permission === undefined ? {} : { DSH_PERMISSION_MODE: manifest.permission }),
-          },
-        },
+    ...(manifest.environment === undefined ? {} : { env: { ...manifest.environment } }),
   }
 })
 

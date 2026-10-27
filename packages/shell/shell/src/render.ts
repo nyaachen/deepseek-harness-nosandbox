@@ -23,8 +23,8 @@ export type ParsedExitStatus =
  *
  * The consumed marker is removed from `body` because a terminal presentation
  * shows the exit status as its own pill: leaving the marker in the output
- * would render the exit twice. Other markers (timeout, sandbox denial) carry
- * facts no pill shows, so they stay in the body.
+ * would render the exit twice. Other markers (truncation, timeout, stop reason)
+ * carry facts no pill shows, so they stay in the body.
  *
  * Replay only retains the rendered content text, not the original
  * `ShellRunResult`, so terminal presentation must recover the exit pill here.

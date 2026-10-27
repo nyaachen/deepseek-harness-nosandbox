@@ -196,7 +196,7 @@ describe('SessionMediaReferences /api/file', () => {
     expect(await responseBytes(await route.call('/remote/photo.png'))).toEqual(PNG_BYTES)
     expect(read).toHaveBeenCalledWith(target, expect.any(AbortSignal), DEFAULT_LIMIT)
     for (const [code, status] of [
-      ['FS_PERMISSION_DENIED', 403], ['FS_SANDBOX_DENIED', 403], ['FS_NOT_FOUND', 404],
+      ['FS_PERMISSION_DENIED', 403], ['FS_NOT_FOUND', 404],
       ['FS_NOT_REGULAR_FILE', 403], ['FS_TOO_LARGE', 413], ['FS_IO_ERROR', 500],
     ] as const) {
       read.mockRejectedValueOnce(new FsError('provider rejected read', code))

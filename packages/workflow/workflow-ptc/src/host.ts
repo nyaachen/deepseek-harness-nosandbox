@@ -1,9 +1,8 @@
-/** Workflow child ownership and progress over the shared sandboxed PTC executor. */
+/** Workflow child ownership and progress over the shared PTC executor. */
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-working-directory'
 import type { PtcBindingFunction, PtcJsonValue, PtcRuntime } from '@deepseek-ai/dsh-ptc-runtime'
-import type { SandboxExecutionPolicy } from '@deepseek-ai/dsh-sandbox'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import type SubagentRuntime from '@deepseek-ai/dsh-subagent'
 import type { SubagentActivation } from '@deepseek-ai/dsh-subagent'
@@ -132,7 +131,6 @@ export class PtcWorkflowRun implements WorkflowRun {
     private readonly parent: Agent,
     private readonly init: WorkerInit,
     private readonly provider: string,
-    private readonly policy: SandboxExecutionPolicy,
     private readonly observer: ExecutionObserver,
     private readonly signal?: AbortSignal,
   ) {
@@ -284,14 +282,10 @@ export class PtcWorkflowRun implements WorkflowRun {
     try {
       const cwd = await this.cwd
       this.requireActive()
-      if (this.runtime.sandboxMode === undefined && this.policy.mode !== 'danger-full-access') {
-        throw new Error(`workflow runtime cannot enforce the ${this.policy.mode} file policy`)
-      }
       const outcome = await this.runtime.run(this.runtime.resolve({
         program: this.runtime.programFormat === 'repl' ? `await (async () => {\n${PROGRAM}\n})()` : PROGRAM,
         bindings: [{ global: 'workflowHost', functions: this.bindings() }],
         cwd,
-        ...this.runtime.sandboxMode === undefined ? {} : { sandboxPolicy: this.policy },
         timeoutMs: null,
         signal: this.controller.signal,
       }))

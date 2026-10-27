@@ -10,12 +10,10 @@ interface Config { root: string }
 /** Empty provider-owned workspace; no operation accesses the host filesystem. */
 export default class ProviderCwdFileSystem extends FileSystem {
   override watch(): never { throw new Error('Fixture does not support watching') }
-  static inject = ['sandboxPolicy']
   static Config: schema<Config> = schema.object({ root: schema.string().required() })
   private readonly config: Config
   constructor(ctx: Context, config: Config) { super(ctx); this.config = config }
 
-  override get sandboxMode(): 'read-only' { return 'read-only' }
   override async resolve(path: string, opts?: { cwd?: string; signal?: AbortSignal }): Promise<FsTarget> {
     opts?.signal?.throwIfAborted()
     const absolute = posix.resolve(opts?.cwd ?? this.config.root, path)
@@ -45,6 +43,6 @@ export default class ProviderCwdFileSystem extends FileSystem {
   override async streamText(): Promise<never> { throw new FsError('No such provider file', 'FS_NOT_FOUND') }
   override async readBytes(): Promise<never> { throw new FsError('No such provider file', 'FS_NOT_FOUND') }
   override async readByteRange(): Promise<never> { throw new FsError('No such provider file', 'FS_NOT_FOUND') }
-  override async writeText(): Promise<never> { throw new FsError('Read-only provider fixture', 'FS_SANDBOX_DENIED') }
-  override async editText(): Promise<never> { throw new FsError('Read-only provider fixture', 'FS_SANDBOX_DENIED') }
+  override async writeText(): Promise<never> { throw new FsError('Read-only provider fixture', 'FS_PERMISSION_DENIED') }
+  override async editText(): Promise<never> { throw new FsError('Read-only provider fixture', 'FS_PERMISSION_DENIED') }
 }

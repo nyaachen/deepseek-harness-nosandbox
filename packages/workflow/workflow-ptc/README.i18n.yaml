@@ -3,20 +3,20 @@
 # After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write packages/workflow/workflow-ptc/README.md
 /:
-  en: c38b437e7e319d4b
-  zh: 2da5213a6120586c
+  en: d975d06209ca560a
+  zh: 09caac533e90593a
 /deepseek-ai-dsh-workflow-ptc:
   en: 9f43ea90b0eb3f34
   zh: dc0afea0b135f671
 /deepseek-ai-dsh-workflow-ptc/summary:
-  en: 9b6df6defa779ce7
-  zh: 43db3d8918707117
+  en: 06dff10b9d792e03
+  zh: ee52c46c326537c2
 /deepseek-ai-dsh-workflow-ptc/table-of-contents:
   en: d152484eb41ac6b4
   zh: 09388d293f9be9cb
 /deepseek-ai-dsh-workflow-ptc/use-this-package:
-  en: 83b0c102b3c07260
-  zh: 7890bb8609063777
+  en: 8abac4259655bce7
+  zh: 0c94ee4f7c6e2ff5
 /deepseek-ai-dsh-workflow-ptc/use-this-package/minimal-configuration:
   en: 9c31c6e17ba018ed
   zh: 85ffe20ce8a5a371

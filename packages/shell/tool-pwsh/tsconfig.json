@@ -39,16 +39,7 @@
       "path": "../../core/system-prompt"
     },
     {
-      "path": "../../shell/shell-env"
-    },
-    {
       "path": "../../interaction/user-approval"
-    },
-    {
-      "path": "../../sandbox/sandbox"
-    },
-    {
-      "path": "../../sandbox/sandbox-policy"
     },
     {
       "path": "../../session/working-directory"

@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs'
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { execFile } from 'node:child_process'
@@ -17,25 +17,22 @@ const runNode = promisify(execFile)
 
 /** Plain Node loads the published workflow package and PTC child bootstrap. */
 describe.skipIf(!built)('built workflow PTC runtime', () => {
-  it('runs a structured child and confines direct writes through installed exports', async () => {
+  it('runs a structured child through installed exports', async () => {
     const driverRoot = await mkdtemp(join(packageRoot, '.built-runtime-'))
     let root: string | undefined
     try {
       root = await mkdtemp(join(homedir(), '.dsh-built-workflow-'))
       const cwd = join(root, 'workspace')
-      const outside = join(root, 'outside.txt')
       await mkdir(cwd)
-      await writeFile(outside, 'unchanged')
       const driver = join(driverRoot, 'driver.mjs')
       await writeFile(driver, `
 import { Context } from '@deepseek-ai/cordis'
 import PtcWorkflowEngine from '@deepseek-ai/dsh-workflow-ptc'
 const ctx = new Context()
 try {
-  for (const name of ['session', 'session-projection', 'agent', 'system-prompt', 'fs-local', 'working-directory', 'subprocess-local', 'sandbox-local']) {
+  for (const name of ['session', 'session-projection', 'agent', 'system-prompt', 'fs-local', 'working-directory', 'subprocess-local']) {
     await ctx.plugin((await import('@deepseek-ai/dsh-' + name)).default, {})
   }
-  await ctx.plugin((await import('@deepseek-ai/dsh-sandbox-policy')).default, { mode: 'read-only', workspaceRoot: process.argv[2] })
   await ctx.plugin((await import('@deepseek-ai/dsh-ptc-runtime-node')).default, {})
   await ctx.plugin((await import('@deepseek-ai/dsh-subagent')).default, {})
   let selectedStarts = 0
@@ -57,8 +54,7 @@ try {
   const parent = { id: session.id, ctx, session, options: {}, status: 'idle' }
   ctx.agents.register(parent)
   const run = ctx.workflowEngine.start({
-    script: "const proc = globalThis.constructor.constructor('return process')(); try { proc.getBuiltinModule('node:fs').writeFileSync(args.outside, 'changed') } catch {} const value = await agent('answer', { schema: { type: 'object', properties: { answer: { type: 'number' } }, required: ['answer'] } }); return value.answer",
-    args: { outside: process.argv[3] },
+    script: "const value = await agent('answer', { schema: { type: 'object', properties: { answer: { type: 'number' } }, required: ['answer'] } }); return value.answer",
     meta: { name: 'built-smoke', description: 'built workflow runtime' },
     subagentProvider: 'built-selected',
     parent,
@@ -72,9 +68,8 @@ try {
   } finally { await run.dispose() }
 } finally { await ctx.fiber.dispose() }
 `, 'utf8')
-      const { stdout } = await runNode(process.execPath, [driver, cwd, outside], { cwd: packageRoot, timeout: 60_000 })
+      const { stdout } = await runNode(process.execPath, [driver, cwd], { cwd: packageRoot, timeout: 60_000 })
       expect(stdout).toContain('built-runtime-smoke-ok')
-      expect(await readFile(outside, 'utf8')).toBe('unchanged')
     } finally {
       await rm(driverRoot, { recursive: true, force: true })
       if (root !== undefined) await rm(root, { recursive: true, force: true })

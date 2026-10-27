@@ -1,5 +1,5 @@
 ---
-description: "Run Python model code in fresh CPython processes under the shared filesystem sandbox, with configured resource budgets and async host bindings."
+description: "Run Python model code in fresh CPython processes with configured resource budgets and async host bindings."
 kind: "package-reference"
 ---
 
@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-Run model-generated Python in a fresh CPython 3.10+ process on macOS or Linux under the same file policy as TypeScript PTC. Programs can use top-level `await` and `return`, call configured bindings, and write normal stdout/stderr. Direct file operations follow the selected sandbox policy; resource budgets and process-group teardown bound execution. No state persists across runs, and no shipped profile enables this experimental runtime.
+Run model-generated Python in a fresh CPython 3.10+ process on macOS or Linux. Programs can use top-level `await` and `return`, call configured bindings, and write normal stdout/stderr. Resource budgets and process-group teardown bound execution. No state persists across runs, and no shipped profile enables this experimental runtime.
 
 ## Table of Contents
 
@@ -27,16 +27,16 @@ Run model-generated Python in a fresh CPython 3.10+ process on macOS or Linux un
 
 Choose this published experimental package only in an explicit composition. Register `PythonPtcRuntime` beside `dsh-tools`; `run(resolve(request))` executes each program in a fresh CPython 3.10+ subprocess, resolving with `result.value` on success and `result.error` on failure (the orthogonal `PtcRunFailure.kind` taxonomy classifies parse failures, thrown exceptions, invalid completions, output overflows, budget expiry, aborts, unavailable confinement, and substrate death). It rejects only for caller misuse, such as malformed bindings, unresolved execution options, or a call after disposal. Configuration is rejected at load: a non-Unix platform; an explicit `pythonBin` that is not an executable regular file or a bare name that does not resolve on `PATH`; a non-CPython, pre-3.10, or probe-failing interpreter; a non-positive or non-integer budget; a `maxLogBytes` below the truncation-marker floor (64); a timer value `setTimeout` would clamp; a budget larger than the effective fd-3 frame cap (lowered when the host heap cannot safely parse a near-cap frame); or an `addressSpaceMb`/output-budget pair whose worst-case peak would breach `RLIMIT_AS`.
 
-The composition must supply `sandbox` and `sandboxPolicy` for this local execution host. `resolve(request)` accepts an explicit `sandboxPolicy` or resolves the shared deployment policy, and defaults `cwd` to that policy's workspace root. PTC mode supplies the calling Session's policy and directory. The configured `maxWallMs` remains the execution deadline; explicit `timeoutMs` overrides are unsupported.
+The composition must supply a local execution host for the interpreter. `resolve(request)` defaults `cwd` to the provider process directory. PTC mode supplies the calling Session's directory. The configured `maxWallMs` remains the execution deadline; explicit `timeoutMs` overrides are unsupported.
 
-`read-only` and `workspace-write` execute through the configured sandbox provider; `danger-full-access` explicitly bypasses confinement. `result.sandbox` reports the mode, observed denial, and the backend's full or partial enforcement separately from the program outcome. The [sandbox service](../../sandbox/sandbox/README.md) defines the file restrictions and backend limits; these modes do not restrict network access or arbitrary file reads.
+The provider runs the configured interpreter with no restriction beyond the resource budgets, so a program has the host account's own filesystem and network access.
 
-The runtime advertises file confinement so `run_code` exposes `sandbox_permissions` and `justification`. Approval widens access for that complete program once; nested tools retain their own policies and approvals. Programs are never replayed automatically after a denial. See [PTC mode](../../core/tools/README.md#ptc-mode) for the consumer's escalation instructions.
+Programs are never replayed automatically. See [PTC mode](../../core/tools/README.md#ptc-mode) for the consumer's `run_code` contract.
 
 The runtime supplies these execution instructions:
 
 ```text
-The program is the body of an async Python function. Top-level await and return are supported. Emit output with print(...) or return a lossless JSON value. Only printed values and the returned value become program output. Each call runs in a fresh Python process; variables and imported modules do not persist across calls. Relative paths use the supplied working directory; only TMPDIR is set in the environment. Direct filesystem access follows this execution's sandbox policy.
+The program is the body of an async Python function. Top-level await and return are supported. Emit output with print(...) or return a lossless JSON value. Only printed values and the returned value become program output. Each call runs in a fresh Python process; variables and imported modules do not persist across calls. Relative paths use the supplied working directory; only TMPDIR is set in the environment.
 ```
 
 ### What you get
@@ -49,7 +49,7 @@ Frames travel on the child's fd 3 as JSON-lines — one object per line — so s
 
 ### What can go wrong
 
-Required confinement that cannot be established returns `sandbox-unavailable`; the runtime never retries unconfined. An operation denied by a working sandbox remains a program failure with `sandbox.denied` set when its diagnostic matches the selected backend. A caught denial need not appear in this diagnostic flag.
+A program failure is reported with its failure kind and message; the runtime never retries a failed program.
 
 Host-side validation drops junk without throwing, so a malformed or forged frame never crashes the host process: `validateChildFrame` returns `undefined` for anything that does not rebuild cleanly, a non-number call id can never be echoed into a reply, and forged extra fields never ride along. A completion value that is not lossless JSON, or that exceeds the configured byte budget, is rejected explicitly (`non-lossless` / `over-budget`) rather than silently rounded or truncated. An fd-3 frame whose raw length exceeds the effective frame parse cap (64 MiB, or lower when the host's configured heap cannot safely parse a near-cap frame — see `hostFrameParseCeiling`) settles the run as a `worker-exit` (the receive path caps raw frames before `toString`/`JSON.parse` so a compact wide frame cannot decode to far more host memory than its wire bytes admitted).
 
@@ -67,7 +67,7 @@ This section explains the design behind the backend; observable behavior is full
 
 One direction of trust: the host treats every inbound frame as hostile (model code can forge anything on fd 3) and REBUILDS it field by field before reading; the Python side trusts host replies. The bootstrap (`py/bootstrap.py`) runs the program as the body of an async function, so top-level `await` and `return` work; binding calls travel over fd 3 as JSON-lines and replies are paced across the pump so a flood of large replies cannot pin the host's fd-3 write buffer.
 
-The shipped bootstrap and protocol sources reach the interpreter as UTF-8 JSON on trusted binary stdin, independently of sandbox temporary-directory mounts and locale text encoding. Model programs and binding traffic use fd 3. The host resolves the sandbox runner before spawning with only `TMPDIR` in the child environment. The wall deadline includes sandbox setup. The configured interpreter's load-time version probe runs outside confinement and executes no model code.
+The shipped bootstrap and protocol sources reach the interpreter as UTF-8 JSON on trusted binary stdin, independently of temporary-directory mounts and locale text encoding. Model programs and binding traffic use fd 3. The child environment carries only `TMPDIR`. The configured interpreter's load-time version probe executes no model code.
 
 ### Wire contract
 
@@ -129,12 +129,12 @@ These limits define what the package does and does not cover; they are current p
 - **A descendant that escapes the child's process group with `setsid()` is not reaped by the group teardown** — `kill(-pid)` cannot reach it; the run still settles on the value the done frame decided, and the close-deadline backstop forces settlement if the orphan holds the pipes open, but the orphan itself outlives the fiber until it exits on its own.
 - **A `log` frame that arrives after settlement is dropped** — once the run has settled, host-side capture is closed; a late fd-3 `log` frame (from a thread that outlived the done frame) is discarded rather than appended to `logs`.
 - **A binding REPLY value has no seam-level byte or depth cap** — `maxValueBytes` meters only the done frame's completion value; a wide binding reply is rebuilt host-side (`snapshotJsonValue` traversal) and encoded whole, bounded on both sides only by process memory (like a binding argument, which has no child-side budget either).
-- **No shipped profile mounts this provider** — the keyless `ptc-python-turn` snapshot replaces the headless PTC runtime through the real Loader; released profiles use the sandboxed Node process backend.
+- **No shipped profile mounts this provider** — the keyless `ptc-python-turn` snapshot replaces the headless PTC runtime through the real Loader; released profiles use the Node process backend.
 - **Workflow execution requires Node** — compositions using this Python provider disable `workflow-ptc`, `tool-workflow`, and `tool-ralph`; the workflow provider rejects an incompatible runtime when loaded.
 - **Cross-channel log interleaving is backend-dependent** — Python stdout, stderr, and fd-3 log frames travel independently; each channel preserves its own order, while their total order in `result.logs` may differ.
 - **CPython 3.10 or newer is required** — the configured executable is resolved and version-probed at load; unsupported interpreters fail before `ctx.ptcRuntime` is registered.
-- **Execution is local and Unix-only** — the interpreter, working directory, and sandbox runner must belong to the host running this plugin. The provider uses POSIX resource limits and process-group signals; it does not support Windows or remote execution providers.
-- **Sandbox enforcement inherits backend limits** — a successful program can report partial enforcement, and file confinement does not establish multi-tenant isolation or complete descendant cleanup.
+- **Execution is local and Unix-only** — the interpreter and working directory must belong to the host running this plugin. The provider uses POSIX resource limits and process-group signals; it does not support Windows or remote execution providers.
+- **Programs run with the host's own authority** — this backend establishes no isolation between a program and the host account, and does not guarantee complete descendant cleanup.
 - **Diagnostic prefixes omit the package's experimental qualifier** — the marker `[dsh-ptc-runtime-python] log capture truncated at <N> bytes` identifies this provider independently of its npm package name. The protocol mirror verifies identical marker bytes in TypeScript and Python.
 - **`run()` is one-shot** — `logs` become available only after `PtcRunResult` resolves; there is no streaming-log or progress interface for output produced by a running program.
 - **No state persists across runs** — every request executes in a fresh subprocess; a persistent REPL-style kernel stays deferred until a backend brings its own logging scheme.

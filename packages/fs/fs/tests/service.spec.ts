@@ -90,7 +90,6 @@ describe('FileSystem provider seam', () => {
     const ctx = new Context()
     await ctx.plugin(FakeFileSystem)
     const fs = ctx.fs as FakeFileSystem
-    expect(fs.sandboxMode).toBeUndefined()
     expect(fs.processPathFromHostPath('/host/file')).toBeUndefined()
     fs.files.set('a.txt', 'hi')
     const target = await fs.resolve('a.txt')

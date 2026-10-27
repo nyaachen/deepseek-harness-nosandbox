@@ -3,8 +3,6 @@ import { spawn, spawnSync } from 'node:child_process'
 import { once } from 'node:events'
 import { mkdtemp, realpath, rm } from 'node:fs/promises'
 import { createInterface } from 'node:readline'
-import { Context } from '@deepseek-ai/cordis'
-import { LocalSandboxProvider } from '@deepseek-ai/dsh-sandbox-local'
 import { describe, expect, it } from 'vitest'
 
 // This fixture has no credentials, application state, or descendants. Port zero
@@ -18,8 +16,6 @@ process.stdout.write('ready\\n');
 describe.skipIf(process.platform !== 'darwin')('SSH helper inspector signal hardening', () => {
   it.each([false, true])('observes actual debugger activation with SIGUSR1 disabled=%s', async (disabled) => {
     const root = await realpath(await mkdtemp('/tmp/dsh-ssh-inspector-'))
-    const ctx = new Context()
-    const sandbox = await ctx.plugin(LocalSandboxProvider)
     const child = spawn(process.execPath, [...(disabled ? ['--disable-sigusr1'] : []), '--inspect-port=0', '-e', fixture], {
       cwd: root, env: {}, stdio: ['pipe', 'pipe', 'pipe'],
     })
@@ -35,10 +31,9 @@ describe.skipIf(process.platform !== 'darwin')('SSH helper inspector signal hard
     })
     try {
       expect((await replies.next()).value).toBe('ready')
-      const signal = await ctx.sandbox.confine([process.execPath, '-e', `process.kill(${String(child.pid)}, 'SIGUSR1')`], {
-        mode: 'read-only', workspaceRoot: root,
+      const sender = spawnSync(process.execPath, ['-e', `process.kill(${String(child.pid)}, 'SIGUSR1')`], {
+        cwd: root, env: {}, encoding: 'utf8', timeout: 3000,
       })
-      const sender = spawnSync(signal.argv[0]!, signal.argv.slice(1), { cwd: root, env: {}, encoding: 'utf8', timeout: 3000 })
       expect(sender.error).toBeUndefined()
       expect(sender.status, sender.stderr).toBe(0)
       if (!disabled) await Promise.race([
@@ -53,7 +48,6 @@ describe.skipIf(process.platform !== 'darwin')('SSH helper inspector signal hard
       lines.close()
       child.kill('SIGTERM')
       await closed
-      await sandbox.dispose()
       await rm(root, { recursive: true, force: true })
     }
   }, 10_000)

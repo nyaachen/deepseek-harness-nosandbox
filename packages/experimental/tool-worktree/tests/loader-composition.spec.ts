@@ -12,8 +12,6 @@ import AgentRegistry from '@deepseek-ai/dsh-agent'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import LocalFileSystem from '@deepseek-ai/dsh-fs-local'
 import LlmRuntime, { ToolCallId } from '@deepseek-ai/dsh-llm'
-import LocalSandbox from '@deepseek-ai/dsh-sandbox-local'
-import SandboxPolicyService from '@deepseek-ai/dsh-sandbox-policy'
 import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import LocalSubprocessRuntime from '@deepseek-ai/dsh-subprocess-local'
@@ -59,8 +57,6 @@ describe('worktree tool through real Loader composition', () => {
       ['@deepseek-ai/dsh-tools', ToolRuntime],
       ['@deepseek-ai/dsh-fs-local', LocalFileSystem],
       ['@deepseek-ai/dsh-subprocess-local', LocalSubprocessRuntime],
-      ['@deepseek-ai/dsh-sandbox-local', LocalSandbox],
-      ['@deepseek-ai/dsh-sandbox-policy', SandboxPolicyService],
       ['@deepseek-ai/dsh-working-directory', WorkingDirectoryService],
       ['@deepseek-ai/dsh-experimental-worktree', WorktreeService],
       ['@deepseek-ai/dsh-experimental-tool-worktree', ToolWorktree],
@@ -68,7 +64,6 @@ describe('worktree tool through real Loader composition', () => {
     ])
     const config = [...modules.keys()].flatMap(name => [
       `- name: 'cordis:${name}'`,
-      ...name === '@deepseek-ai/dsh-sandbox-policy' ? ['  config:', '    mode: danger-full-access'] : [],
       ...name === '@deepseek-ai/dsh-agent-loop' ? ['  config:', '    agents: []'] : [],
     ]).join('\n') + '\n'
     const configPath = join(root, 'cordis.yml')

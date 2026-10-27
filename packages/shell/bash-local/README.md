@@ -1,5 +1,5 @@
 ---
-description: "The default POSIX Bash executor for deployments and maintainers choosing, configuring, or debugging unconfined command execution over the shell seam."
+description: "The default POSIX Bash executor for deployments and maintainers choosing, configuring, or debugging command execution over the shell seam."
 kind: "package-reference"
 ---
 
@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-`dsh-bash-local` is the default Bash executor for POSIX: every command runs as a fresh, non-login `bash -c` process with no rc files, so no shell state survives between calls. It applies configured budgets — working directory, timeout, output caps — to each command, classifies timeouts and cancellations, and returns bounded output with spill-file recovery when a stream overflows. Commands run with the harness process's own authority: this executor confines nothing, so compose `dsh-bash-sandbox` when commands need the sandbox capability. The model-facing `bash` tool talks to it once it is mounted.
+`dsh-bash-local` is the default Bash executor for POSIX: every command runs as a fresh, non-login `bash -c` process with no rc files, so no shell state survives between calls. It applies configured budgets — working directory, timeout, output caps — to each command, classifies timeouts and cancellations, and returns bounded output with spill-file recovery when a stream overflows. Commands run with the harness process's own authority; this executor applies no policy of its own. The model-facing `bash` tool talks to it once it is mounted.
 
 ## Table of Contents
 
@@ -25,7 +25,7 @@ English | [中文](README.zh.md)
 <a id="use-this-package"></a>
 ## Use this package
 
-Mount this executor when a composition needs Bash command execution on POSIX without confinement. It registers as `ctx.shell`, and the model-facing `bash` tool works over it immediately: an agent calls the tool, and the command runs as a fresh `bash -c` process with the budgets below.
+Mount this executor when a composition needs Bash command execution on POSIX. It registers as `ctx.shell`, and the model-facing `bash` tool works over it immediately: an agent calls the tool, and the command runs as a fresh `bash -c` process with the budgets below.
 
 ### Minimal configuration
 
@@ -110,10 +110,9 @@ The foreground deadline starts before argv preparation and retains the same sign
 <a id="further-exploration"></a>
 ## Further Exploration
 
-Read these pages when the executor contract is not enough. They move from the seam to the confining sibling and the mechanics underneath.
+Read these pages when the executor contract is not enough. They move from the seam to the model-facing tool and the mechanics underneath.
 
 - [shell seam](../shell/README.md) — the executor contract this provider implements, including the request/spec split.
-- [bash-sandbox](../bash-sandbox/README.md) — the confining executor to compose instead when commands need the sandbox capability.
 - [tool-bash](../tool-bash/README.md) — the model-facing `bash` tool over this executor.
 - [Bash executor subsystem](../../../docs/subsystems/shell.md) — request/spec vocabulary, results, and the service contract in full.
 - [subprocess-local](../../subprocess/subprocess-local/README.md) — the managed-range mechanics behind this executor.
@@ -136,7 +135,7 @@ No direct invalidation; the named consumer owns any request-prefix changes.
 
 These limits define when this executor is a poor fit. They are current package constraints, not a roadmap.
 
-- **Unconfined by itself** — commands run with the harness process's authority; deployments needing confinement compose `dsh-bash-sandbox`, while per-call allow/deny/ask policy belongs on the tools' `pre-execute` waterfall.
+- **No policy layer of its own** — commands run with the harness process's authority; per-call allow/deny/ask policy belongs on the tools' `pre-execute` waterfall.
 - **No persistent shell or PTY** — every call starts a fresh non-login `bash -c`; cwd-only persistence and interactive terminal sessions remain deferred until a real workflow requires them.
 - **POSIX-only** — the `bash` binary is hardcoded and the underlying service's group semantics are POSIX; Windows is unsupported.
 - **A background provider-failure note is the whole stderr stream** — `SubprocessHandle.done` can reject before or after target execution begins, and the subprocess service buffers no output for a target that never reported, so the executor serves the stage-neutral `subprocess failed before reporting an outcome: …` as the observed stderr stream (offset readers re-read it at their own offsets) and folds it into exactly one `readOutput()` delta; a consuming reader that discards that delta recovers it only through `observed.stderr`.

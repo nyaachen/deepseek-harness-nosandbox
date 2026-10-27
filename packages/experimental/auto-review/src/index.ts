@@ -1,9 +1,10 @@
 /**
- * LLM-backed authorization gate for the current-session-only Auto permission
- * preset. Every native call and every started PTC inner call is reviewed once
+ * LLM-backed authorization gate for the tool calls the composed deployment
+ * serves. Every native call and every started PTC inner call is reviewed once
  * before its body; the outer `run_code` transport is deliberately excluded.
- * Under the `ask` approval policy a reviewer denial asks the user; under
- * `never` it is final.
+ * Composing this package arms the gate for every Session; there is no
+ * per-Session switch. Under the `ask` approval policy a reviewer denial asks
+ * the user; under `never` it is final.
  *
  * @module @deepseek-ai/dsh-experimental-auto-review
  */
@@ -22,7 +23,6 @@ import {
   type ToolSchema,
 } from '@deepseek-ai/dsh-llm'
 import { deepFreeze } from '@deepseek-ai/dsh-util-values'
-import { AUTO_PRESET } from '@deepseek-ai/dsh-permission-presets'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-subagent'
 import type {} from '@deepseek-ai/dsh-user-approval'
@@ -123,8 +123,8 @@ interface ScopedPtcStart {
 
 /** Cordis plugin name used by loader diagnostics. */
 export const name = 'experimental-auto-review'
-/** Complete host services required before Auto may be advertised. */
-export const inject = ['approval', 'llm', 'permissionPresets', 'sessions', 'tools', 'workingDirectory']
+/** Complete host services required before the review gate may install. */
+export const inject = ['approval', 'llm', 'tools', 'workingDirectory']
 
 /** Return JSON text for one immutable logged value. */
 function json(value: unknown): string {
@@ -672,10 +672,8 @@ function failed(exec: ToolExecution, error: unknown): PreToolDecision {
   }
 }
 
-/** Install the Auto preset and its prepended per-call review gate. */
+/** Install the prepended per-call review gate. */
 export function apply(ctx: Context): void {
-  // Retain the injected service while this context drains on disposal.
-  const permissionPresets = ctx.permissionPresets
   let accepting = true
   const active = new Set<Promise<void>>()
   const lifecycle = new AbortController()
@@ -684,9 +682,6 @@ export function apply(ctx: Context): void {
     const stopListener = ctx.on('tools/pre-execute', async (exec, next): Promise<PreToolDecision> => {
       const agent = exec.agent
       if (agent === undefined || (exec.parent === undefined && exec.name === RUN_CODE_NAME)) {
-        return next()
-      }
-      if (permissionPresets.current(agent.session) !== AUTO_PRESET) {
         return next()
       }
       if (!accepting || lifecycle.signal.aborted) {
@@ -704,8 +699,8 @@ export function apply(ctx: Context): void {
         if (isAborted(lifecycle.signal)) return { kind: 'cancel' }
         if (!review.ok) return failed(exec, review.error)
         const { decision } = review
-        // The permission owner pins an approval policy into every published Session.
-        if (decision.decision === 'deny' && ctx.approval.overrideOf(agent.session) === 'never') {
+        const policy = ctx.approval.overrideOf(agent.session) ?? ctx.approval.config.policy ?? 'ask'
+        if (decision.decision === 'deny' && policy === 'never') {
           return denied(exec, decision.reason)
         }
         const downstream = await next()
@@ -718,21 +713,10 @@ export function apply(ctx: Context): void {
       }
     }, { prepend: true })
     yield stopListener
-    const stopContribution = permissionPresets.registerAuto(() => {
-      if (!accepting) throw new Error('auto-review: integration is closing')
-    })
-    yield stopContribution
     yield async () => {
       accepting = false
-      try {
-        for (const session of ctx.sessions.list()) {
-          if (permissionPresets.current(session) !== AUTO_PRESET) continue
-          permissionPresets.set(session, 'danger-full-access')
-        }
-      } finally {
-        lifecycle.abort(new Error('auto-review integration disposed'))
-        await Promise.allSettled([...active])
-      }
+      lifecycle.abort(new Error('auto-review integration disposed'))
+      await Promise.allSettled([...active])
     }
   }, 'auto-review lifecycle')
 }

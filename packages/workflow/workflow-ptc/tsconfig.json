@@ -45,12 +45,6 @@
       "path": "../../ptc-runtime/ptc-runtime"
     },
     {
-      "path": "../../sandbox/sandbox"
-    },
-    {
-      "path": "../../sandbox/sandbox-policy"
-    },
-    {
       "path": "../../session/working-directory"
     }
   ]

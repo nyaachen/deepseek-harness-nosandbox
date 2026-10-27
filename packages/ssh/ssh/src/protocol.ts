@@ -46,7 +46,7 @@ function operationError(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error))
 }
 
-/** A remote error retains its typed filesystem or sandbox code. */
+/** A remote error retains its typed filesystem code. */
 export class RemoteOperationError extends Error {
   constructor(message: string, readonly code?: string) {
     super(message)

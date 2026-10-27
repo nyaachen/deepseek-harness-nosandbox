@@ -29,7 +29,6 @@ function recordingBash(run: (spec: ShellExecSpec) => Promise<ShellRunResult>): {
         ...request.signal ? { signal: request.signal } : {},
         ...request.stdin !== undefined ? { stdin: request.stdin } : {},
         ...request.env !== undefined ? { env: request.env } : {},
-        sandboxPolicy: request.sandboxPolicy,
       }
     },
     async execute(spec: ShellExecSpec): Promise<ShellExecution> {

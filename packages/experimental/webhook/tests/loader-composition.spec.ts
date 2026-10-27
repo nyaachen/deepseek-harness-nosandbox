@@ -38,7 +38,7 @@ describe('real Loader composition', () => {
       name: 'fixture-dependencies',
       apply(ctx: Context) {
         for (const service of [
-          'agents', 'agentDefaultModel', 'agentPresets', 'permissionPresets', 'sessionTitle', 'workspaceRegistry',
+          'agents', 'agentDefaultModel', 'agentPresets', 'sessionTitle', 'workspaceRegistry',
         ]) {
           ctx.provide(service as never, {} as never)
         }

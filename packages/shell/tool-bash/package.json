@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-tool-bash",
-  "description": "Model-facing bash tool with optional generic background-job and sandbox-escalation support",
-  "version": "0.2.1-rc.2",
+  "description": "Model-facing bash tool with optional generic background-job support",
+  "version": "0.2.1-rc.2.nosandbox",
   "publishConfig": {
     "access": "public"
   },
@@ -33,8 +33,6 @@
     "@deepseek-ai/dsh-shell": "workspace:*",
     "@deepseek-ai/dsh-shell-env": "workspace:*",
     "@deepseek-ai/dsh-llm": "workspace:*",
-    "@deepseek-ai/dsh-sandbox": "workspace:*",
-    "@deepseek-ai/dsh-sandbox-policy": "workspace:*",
     "@deepseek-ai/dsh-system-prompt": "workspace:*",
     "@deepseek-ai/dsh-jobs": "workspace:*",
     "@deepseek-ai/dsh-tools": "workspace:*",
@@ -55,8 +53,6 @@
     "@deepseek-ai/dsh-bash-local": "workspace:*",
     "@deepseek-ai/dsh-llm": "workspace:*",
     "@deepseek-ai/dsh-subprocess-local": "workspace:*",
-    "@deepseek-ai/dsh-sandbox": "workspace:*",
-    "@deepseek-ai/dsh-sandbox-policy": "workspace:*",
     "@deepseek-ai/dsh-session": "workspace:*",
     "@deepseek-ai/dsh-session-persistence-jsonl": "workspace:*",
     "@deepseek-ai/dsh-system-prompt": "workspace:*",

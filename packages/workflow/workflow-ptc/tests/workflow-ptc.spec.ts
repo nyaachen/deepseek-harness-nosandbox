@@ -135,7 +135,7 @@ interface SetupOptions {
 async function setup(options?: SetupOptions) {
   const ctx = new Context()
   await ctx.plugin(SessionProjectionRegistry)
-  await mountPtcRuntime(ctx, 'danger-full-access', options?.persistent ? 'persistent-in-memory' : 'per-call')
+  await mountPtcRuntime(ctx, options?.persistent ? 'persistent-in-memory' : 'per-call')
   provideWorkingDirectoryFixture(ctx)
   await ctx.plugin(SubagentRuntime)
   const provider = new StubProvider(
@@ -180,7 +180,6 @@ describe('dsh-workflow-ptc', { timeout: 120_000 }, () => {
       expect(result.stopReason).toBe('completed')
       expect(result.value).toBe('stub reply')
       expect(execute.mock.calls[0]?.[0].stateOwner).toBeUndefined()
-      expect(execute.mock.calls[0]?.[0].sandboxPolicy?.mode).toBe('danger-full-access')
     })
 
     it('captures args at start and isolates subsequent caller and script mutations', async () => {
@@ -887,7 +886,7 @@ describe('dsh-workflow-ptc', { timeout: 120_000 }, () => {
   describe('process failure and pending child cleanup', () => {
     it('waits for a late provider publication to release its file after cancellation', async () => {
       const ctx = new Context()
-      const { root } = await mountPtcRuntime(ctx, 'read-only')
+      const { root } = await mountPtcRuntime(ctx)
       provideWorkingDirectoryFixture(ctx)
       await ctx.plugin(SubagentRuntime)
       const requested = Promise.withResolvers<SubagentStartRequest>()

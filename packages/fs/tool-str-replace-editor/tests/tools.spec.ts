@@ -10,9 +10,6 @@ import AgentRegistry from '@deepseek-ai/dsh-agent'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import LocalFileSystem from '@deepseek-ai/dsh-fs-local'
 import * as FsPolicy from '@deepseek-ai/dsh-fs-observation-policy'
-import SandboxedFileSystem from '@deepseek-ai/dsh-fs-sandbox'
-import SandboxPolicy from '@deepseek-ai/dsh-sandbox-policy'
-import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import * as ToolStrReplaceEditor from '@deepseek-ai/dsh-tool-str-replace-editor'
@@ -68,7 +65,7 @@ function call(ctx: Context, owner: Agent | undefined, args: unknown) {
 
 async function setup(
   config: ToolStrReplaceEditor.Config = {},
-  options: { fsPolicy?: boolean; sandboxMode?: 'read-only' | 'workspace-write' | 'danger-full-access'; root?: string } = {},
+  options: { fsPolicy?: boolean; root?: string } = {},
 ) {
   const root = options.root ?? await mkdtemp(join(tmpdir(), 'dsh-tool-str-replace-editor-'))
   if (options.root === undefined) roots.push(root)
@@ -77,15 +74,7 @@ async function setup(
   await ctx.plugin(SystemPrompt)
   await ctx.plugin(ToolRuntime)
   await ctx.plugin(AgentRegistry)
-  if (options.sandboxMode === undefined) {
-    await ctx.plugin(LocalFileSystem, { cwd: root })
-  } else {
-    // SandboxPolicy declares the registry as a required injection; mount it
-    // before the policy activates.
-    await ctx.plugin(SessionProjectionRegistry)
-    await ctx.plugin(SandboxPolicy, { mode: options.sandboxMode, workspaceRoot: root })
-    await ctx.plugin(SandboxedFileSystem, { cwd: root })
-  }
+  await ctx.plugin(LocalFileSystem, { cwd: root })
   if (options.fsPolicy === true) await ctx.plugin(FsPolicy)
   const fiber = await ctx.plugin(ToolStrReplaceEditor, config)
   return { ctx, root, fiber, owner: await agent(ctx, root) }
@@ -564,25 +553,6 @@ describe('tool-str-replace-editor', () => {
     expect(await readFile(created, 'utf8')).toBe('new')
   })
 
-  it('passes the session sandbox policy to every mutation', async () => {
-    const { ctx, root, owner } = await setup({}, { sandboxMode: 'read-only' })
-    const path = join(root, 'blocked.txt')
-    const result = await call(ctx, owner, {
-      command: 'create',
-      path,
-      file_text: 'blocked',
-    })
-    expect(result.error).toMatchObject({ info: { code: 'FS_SANDBOX_DENIED' } })
-    expect(text(result)).toContain('[sandbox: file access denied under read-only mode]')
-
-    const ownerless = await call(ctx, undefined, {
-      command: 'create',
-      path: join(root, 'ownerless-blocked.txt'),
-      file_text: 'blocked',
-    })
-    expect(ownerless.error).toMatchObject({ info: { code: 'FS_SANDBOX_DENIED' } })
-  })
-
   it('preserves tabs outside the edited region', async () => {
     const { ctx, root, owner } = await setup()
     const path = join(root, 'Makefile')
@@ -609,20 +579,6 @@ describe('tool-str-replace-editor', () => {
     expect(await readFile(path, 'utf8')).toBe('target:\n\tkept\n\tnew\n')
   })
 
-  it('reports missing sandbox-policy composition during plugin startup', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'dsh-tool-str-replace-editor-missing-policy-'))
-    roots.push(root)
-    const ctx = new Context()
-    contexts.push(ctx)
-    await ctx.plugin(SystemPrompt)
-    await ctx.plugin(ToolRuntime)
-    await ctx.plugin(AgentRegistry)
-    await ctx.plugin(LocalFileSystem, { cwd: root })
-    Object.defineProperty(ctx.fs, 'sandboxMode', { value: 'read-only' })
-
-    await expect(ctx.plugin(ToolStrReplaceEditor))
-      .rejects.toThrow('the mounted filesystem confines but ctx.sandboxPolicy is missing')
-  })
 
   it('maps unexpected backend write failures for replace and insert', async () => {
     const { ctx, root, owner } = await setup()

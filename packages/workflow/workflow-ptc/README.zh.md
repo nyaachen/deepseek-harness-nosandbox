@@ -1,5 +1,5 @@
 ---
-description: "通过共享的沙箱化 PTC Node 进程运行时执行工作流编排，保留工作流钩子、subagent 路由和调用方拥有的取消能力。"
+description: "通过共享的 PTC Node 进程运行时执行工作流编排，保留工作流钩子、subagent 路由和调用方拥有的取消能力。"
 kind: "package-reference"
 ---
 
@@ -9,7 +9,7 @@ kind: "package-reference"
 
 ## 概述
 
-在全新 Node 进程中按调用 Session 的文件沙箱策略运行 JavaScript 工作流。脚本保留 `agent()`、`parallel()`、`pipeline()`、`phase()` 和 `log()` 钩子，委派的工作由 subagent 完成。同一个执行提供方服务 PTC 与工作流，包括需显式启用的 Ralph 循环。运行没有整体经过时间截止；取消会停止受管进程并释放子 agent。所选沙箱与子进程提供方决定强制能力和清理限制。
+在全新 Node 进程中运行 JavaScript 工作流。脚本保留 `agent()`、`parallel()`、`pipeline()`、`phase()` 和 `log()` 钩子，委派的工作由 subagent 完成。同一个执行提供方服务 PTC 与工作流，包括需显式启用的 Ralph 循环。运行没有整体经过时间截止；取消会停止受管进程并释放子 agent。子进程提供方决定受管进程的清理限制。
 
 ## 目录
 
@@ -25,7 +25,7 @@ kind: "package-reference"
 <a id="use-this-package"></a>
 ## 使用本包
 
-在提供 subagent、沙箱策略和 [Node PTC 运行时](../../ptc-runtime/ptc-runtime-node/README.zh.md)的组合中挂载本引擎。它为 `dsh-tool-workflow` 及显式启用时的 `dsh-tool-ralph` 提供工作流执行。Ralph 在已发布默认组合中保持禁用。引擎在加载时拒绝非 TypeScript 的 PTC 提供方。Python PTC 组合必须禁用 `workflow-ptc`、`tool-workflow` 以及任何已启用的 `tool-ralph` 条目。
+在提供 subagent 和 [Node PTC 运行时](../../ptc-runtime/ptc-runtime-node/README.zh.md)的组合中挂载本引擎。它为 `dsh-tool-workflow` 及显式启用时的 `dsh-tool-ralph` 提供工作流执行。Ralph 在已发布默认组合中保持禁用。引擎在加载时拒绝非 TypeScript 的 PTC 提供方。Python PTC 组合必须禁用 `workflow-ptc`、`tool-workflow` 以及任何已启用的 `tool-ralph` 条目。
 
 ### 最小配置
 

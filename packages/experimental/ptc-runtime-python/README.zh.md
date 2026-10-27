@@ -1,5 +1,5 @@
 ---
-description: "在共享文件系统沙箱下以全新 CPython 进程运行 Python 模型代码，提供可配置的资源预算与异步宿主绑定。"
+description: "以全新 CPython 进程运行 Python 模型代码，提供可配置的资源预算与异步宿主绑定。"
 kind: "package-reference"
 ---
 
@@ -9,7 +9,7 @@ kind: "package-reference"
 
 ## 概述
 
-在 macOS 或 Linux 上，以全新的 CPython 3.10+ 进程运行模型生成的 Python，并遵循与 TypeScript PTC 相同的文件策略。程序可以使用顶层 `await` 和 `return`、调用已配置的 binding，并正常写入 stdout/stderr。直接文件操作遵循所选沙箱策略；资源预算和进程组拆卸约束执行。运行之间不保留状态，且没有已发布 profile 启用这个实验性 runtime。
+在 macOS 或 Linux 上，以全新的 CPython 3.10+ 进程运行模型生成的 Python。程序可以使用顶层 `await` 和 `return`、调用已配置的 binding，并正常写入 stdout/stderr。资源预算和进程组拆卸约束执行。运行之间不保留状态，且没有已发布 profile 启用这个实验性 runtime。
 
 ## 目录
 
@@ -27,16 +27,16 @@ kind: "package-reference"
 
 仅在显式组合中选择这个已发布的实验包。将 `PythonPtcRuntime` 与 `dsh-tools` 一起注册后，`run(resolve(request))` 会在全新的 CPython 3.10+ 子进程中执行每个程序；成功时以 `result.value` resolve，失败时以 `result.error` resolve（正交的 `PtcRunFailure.kind` 分类涵盖解析失败、抛出异常、无效完成值、输出溢出、预算到期、中止、约束不可用与执行基底终止）。仅有调用方误用会 reject，例如 binding 不合法、执行选项未解析，或在 dispose 后调用。配置在加载期拒绝：非 Unix 平台；不是可执行普通文件的显式 `pythonBin`，或无法在 `PATH` 上解析的裸名；非 CPython、低于 3.10 或探测失败的解释器；非正或非整数预算；低于截断标记下限（64）的 `maxLogBytes`；会被 `setTimeout` 截断的定时器值；超过有效 fd-3 帧上限的预算（宿主堆无法安全解析接近上限的帧时，该上限会降低）；或最坏峰值会突破 `RLIMIT_AS` 的 `addressSpaceMb`／输出预算组合。
 
-组合必须为此本地执行宿主提供 `sandbox` 和 `sandboxPolicy`。`resolve(request)` 接受显式 `sandboxPolicy`，或解析共享部署策略，并将 `cwd` 默认设为该策略的工作区根目录。PTC mode 提供调用 Session 的策略和目录。配置的 `maxWallMs` 仍是执行截止时间；不支持显式 `timeoutMs` 覆盖。
+组合必须为此本地执行宿主提供解释器。`resolve(request)` 将 `cwd` 默认设为提供方进程目录。PTC mode 提供调用 Session 的目录。配置的 `maxWallMs` 仍是执行截止时间；不支持显式 `timeoutMs` 覆盖。
 
-`read-only` 和 `workspace-write` 通过配置的沙箱提供方执行；`danger-full-access` 显式绕过约束。`result.sandbox` 独立于程序结果报告模式、观察到的拒绝，以及后端的完整或部分强制能力。[沙箱服务](../../sandbox/sandbox/README.zh.md)定义文件限制与后端局限；这些模式不限制网络访问或任意文件读取。
+除资源预算外，提供方不限制所配置解释器的执行，因此程序拥有宿主账户自身的文件系统与网络访问能力。
 
-运行时声明文件约束，因此 `run_code` 暴露 `sandbox_permissions` 和 `justification`。审批只为完整程序的一次执行扩大访问权限；嵌套工具保留各自的策略与审批。程序在拒绝后绝不自动重放。消费方的升级权限指引见 [PTC mode](../../core/tools/README.zh.md#ptc-mode)。
+程序绝不自动重放。消费方的 `run_code` 约定见 [PTC mode](../../core/tools/README.zh.md#ptc-mode)。
 
 运行时提供以下执行指引：
 
 ```text
-The program is the body of an async Python function. Top-level await and return are supported. Emit output with print(...) or return a lossless JSON value. Only printed values and the returned value become program output. Each call runs in a fresh Python process; variables and imported modules do not persist across calls. Relative paths use the supplied working directory; only TMPDIR is set in the environment. Direct filesystem access follows this execution's sandbox policy.
+The program is the body of an async Python function. Top-level await and return are supported. Emit output with print(...) or return a lossless JSON value. Only printed values and the returned value become program output. Each call runs in a fresh Python process; variables and imported modules do not persist across calls. Relative paths use the supplied working directory; only TMPDIR is set in the environment.
 ```
 
 ### 你得到什么
@@ -49,7 +49,7 @@ The program is the body of an async Python function. Top-level await and return 
 
 ### 可能出错的地方
 
-无法建立所需约束时返回 `sandbox-unavailable`；运行时绝不在无约束状态下重试。工作正常的沙箱拒绝某个操作时，它仍属于程序失败；当诊断与所选后端匹配时，设置 `sandbox.denied`。被程序捕获的拒绝不一定体现在这个诊断标志中。
+程序失败以失败类别与消息报告；运行时绝不重试失败的程序。
 
 宿主侧校验在不抛异常的情况下丢弃垃圾，因此畸形或伪造帧永远不会让宿主进程崩溃：`validateChildFrame` 对任何不能干净重建的内容返回 `undefined`，非数字的 call id 永远不会被回显进 reply，伪造的额外字段永远不会被带走。非无损 JSON 或超过配置字节预算的完成值会被显式拒绝（`non-lossless`／`over-budget`），而不是被静默取整或截断。原始长度超过有效帧解析上限（64 MiB，或当宿主的配置堆无法安全解析接近上限的帧时更低——见 `hostFrameParseCeiling`）的 fd-3 帧会让本次运行以 `worker-exit` 结算（接收路径在 `toString`/`JSON.parse` 之前限制原始帧，紧凑宽帧不能解码出远超其线上字节的宿主内存）。
 
@@ -67,7 +67,7 @@ The program is the body of an async Python function. Top-level await and return 
 
 单向信任：宿主把每条入站帧都视为敌意（模型代码可以在 fd 3 上伪造任何内容）并逐字段重建后才读取；Python 侧信任宿主回复。bootstrap（`py/bootstrap.py`）把程序作为 async 函数体执行，因此顶层 `await` 与 `return` 都可用；binding 调用经 fd 3 以 JSON-lines 往返，回复在 pump 中限速，以免大量大回复钉住宿主的 fd-3 可写缓冲。
 
-已发布的 bootstrap 与 protocol 源码以 UTF-8 JSON 通过可信二进制 stdin 传入解释器，不依赖沙箱中的临时目录挂载或 locale 文本编码。模型程序与 binding 通信使用 fd 3。宿主在启动前解析沙箱 runner，子进程环境中只保留 `TMPDIR`。经过时间截止包含沙箱准备。所配置解释器的加载期版本探测在约束之外运行，不执行模型代码。
+已发布的 bootstrap 与 protocol 源码以 UTF-8 JSON 通过可信二进制 stdin 传入解释器，不依赖临时目录挂载或 locale 文本编码。模型程序与 binding 通信使用 fd 3。子进程环境只携带 `TMPDIR`。所配置解释器的加载期版本探测不执行模型代码。
 
 ### wire 契约
 
@@ -129,12 +129,12 @@ The program is the body of an async Python function. Top-level await and return 
 - **以 `setsid()` 逃出子进程组后代不被组拆卸回收**——`kill(-pid)` 够不到它；运行仍按 done 帧决定的值结算，若该孤儿持有管道，close 截止兜底会强制结算，但孤儿本身在自行退出前一直存活到 fiber 之外。
 - **结算后到达的 `log` 帧被丢弃**——运行一旦结算，宿主侧捕获即关闭；迟到的 fd-3 `log` 帧（来自比 done 帧存活更久的线程）会被丢弃，而不是追加到 `logs`。
 - **binding 回复值没有 seam 级字节或深度上限**——`maxValueBytes` 只计量 done 帧的完成值；宽 binding 回复在宿主侧重建（`snapshotJsonValue` 遍历）并整帧编码，两侧都只受进程内存约束（与没有子进程侧预算的 binding 实参一样）。
-- **已发布 profile 均不挂载本提供方**——keyless `ptc-python-turn` 快照通过真实 Loader 替换 headless PTC 运行时；已发布 profile 使用沙箱 Node 进程后端。
+- **已发布 profile 均不挂载本提供方**——keyless `ptc-python-turn` 快照通过真实 Loader 替换 headless PTC 运行时；已发布 profile 使用 Node 进程后端。
 - **工作流执行需要 Node**——使用本 Python 提供方的组合禁用 `workflow-ptc`、`tool-workflow` 和 `tool-ralph`；工作流提供方在加载时拒绝不兼容的运行时。
 - **跨通道日志交错由后端决定**——Python stdout、stderr 与 fd-3 日志帧彼此独立传输；每个通道保留自身顺序，但它们在 `result.logs` 中的总顺序可能不同。
 - **需要 CPython 3.10 或更高版本**——配置的可执行文件会在加载期完成解析与版本探测；不受支持的解释器会在 `ctx.ptcRuntime` 注册前失败。
-- **执行限于本地 Unix 宿主**——解释器、工作目录与沙箱 runner 必须位于运行本插件的宿主上。提供方使用 POSIX 资源限制和进程组信号；不支持 Windows 或远程执行提供方。
-- **沙箱强制能力继承后端限制**——成功的程序也可能报告部分强制能力，文件约束不构成多租户隔离或完整的后代清理保证。
+- **执行限于本地 Unix 宿主**——解释器与工作目录必须位于运行本插件的宿主上。提供方使用 POSIX 资源限制和进程组信号；不支持 Windows 或远程执行提供方。
+- **程序以宿主自身的权限运行**——此后端不建立程序与宿主账户之间的隔离，也不保证完整的后代进程清理。
 - **诊断前缀省略包名中的 experimental 限定词**——标记 `[dsh-ptc-runtime-python] log capture truncated at <N> bytes` 独立于 npm 包名来标识本提供方。协议镜像检查 TypeScript 与 Python 的标记字节完全相同。
 - **`run()` 是一次性的**——`logs` 只有在 `PtcRunResult` resolve 后才能获得；没有为运行中程序产生的输出提供流式日志或进度接口。
 - **运行之间不保留状态**——每次请求都在全新子进程中执行；持久 REPL 风格内核在某个后端带来自己的日志方案之前保持延期。

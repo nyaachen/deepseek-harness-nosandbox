@@ -208,14 +208,6 @@
         }
       },
       {
-        "definitionId": "@deepseek-ai/dsh-permission-presets",
-        "name": "permission",
-        "description": "Switch the permission preset (sandbox mode + approval policy)",
-        "input": {
-          "hint": "<preset>"
-        }
-      },
-      {
         "definitionId": "@deepseek-ai/dsh-plan-mode",
         "name": "plan",
         "description": "Enter or leave plan mode",
@@ -292,21 +284,6 @@
                 "status": "pending"
               }
             ],
-            "permissions": {
-              "options": [
-                {
-                  "value": "workspace-write",
-                  "name": "workspace-write",
-                  "description": "Write inside the workspace and permitted temporary directories; wider retries require approval."
-                },
-                {
-                  "value": "danger-full-access",
-                  "name": "danger-full-access",
-                  "description": "Full file access without approval prompts."
-                }
-              ],
-              "currentValue": "workspace-write"
-            },
             "plan": {
               "active": false,
               "pending": false
@@ -360,21 +337,6 @@
               "next": null
             },
             "todos": null,
-            "permissions": {
-              "options": [
-                {
-                  "value": "workspace-write",
-                  "name": "workspace-write",
-                  "description": "Write inside the workspace and permitted temporary directories; wider retries require approval."
-                },
-                {
-                  "value": "danger-full-access",
-                  "name": "danger-full-access",
-                  "description": "Full file access without approval prompts."
-                }
-              ],
-              "currentValue": "workspace-write"
-            },
             "plan": {
               "active": false,
               "pending": false
@@ -425,21 +387,6 @@
               "next": null
             },
             "todos": null,
-            "permissions": {
-              "options": [
-                {
-                  "value": "workspace-write",
-                  "name": "workspace-write",
-                  "description": "Write inside the workspace and permitted temporary directories; wider retries require approval."
-                },
-                {
-                  "value": "danger-full-access",
-                  "name": "danger-full-access",
-                  "description": "Full file access without approval prompts."
-                }
-              ],
-              "currentValue": "workspace-write"
-            },
             "plan": {
               "active": false,
               "pending": false
@@ -5697,21 +5644,6 @@
             "status": "pending"
           }
         ],
-        "permissions": {
-          "options": [
-            {
-              "value": "workspace-write",
-              "name": "workspace-write",
-              "description": "Write inside the workspace and permitted temporary directories; wider retries require approval."
-            },
-            {
-              "value": "danger-full-access",
-              "name": "danger-full-access",
-              "description": "Full file access without approval prompts."
-            }
-          ],
-          "currentValue": "workspace-write"
-        },
         "plan": {
           "active": false,
           "pending": false

@@ -198,10 +198,10 @@ export interface RunOptions {
   prepareWorkspace?: (cwd: string) => void | Promise<void>
   /**
    * Parent directory for the generated session cwd. Defaults to
-   * `os.tmpdir()`. A scenario that must distinguish its workspace from the
-   * sandbox's always-writable temporary roots can place the generated child
-   * under `os.homedir()` instead. The harness removes only that generated
-   * child, never the supplied parent.
+   * `os.tmpdir()`. A scenario can place the generated child elsewhere, for
+   * example under `os.homedir()` when the platform temp filesystem must not
+   * hold it. The harness removes only that generated child, never the supplied
+   * parent.
    */
   workspaceParent?: string
   /**

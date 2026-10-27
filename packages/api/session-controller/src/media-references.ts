@@ -51,7 +51,6 @@ async function serveFile(request: Request, fs: FileSystem, maxBytes: number): Pr
       FS_NOT_FOUND: 404,
       FS_NOT_REGULAR_FILE: 403,
       FS_PERMISSION_DENIED: 403,
-      FS_SANDBOX_DENIED: 403,
       FS_TOO_LARGE: 413,
       FS_ABORTED: 499,
     }

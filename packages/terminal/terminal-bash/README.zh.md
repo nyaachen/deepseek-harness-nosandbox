@@ -1,5 +1,5 @@
 ---
-description: "持久终端会话的随产品交付的 shell 后端：在共享沙箱策略下启动交互式 bash 或 pwsh，带就绪检测与有界逐行输出。"
+description: "持久终端会话的随产品交付的 shell 后端：交互式 bash 或 pwsh，带就绪检测与有界逐行输出。"
 kind: "package-reference"
 ---
 
@@ -9,7 +9,7 @@ kind: "package-reference"
 
 ## 概述
 
-`dsh-terminal-bash` 在部署的沙箱策略下启动持久交互式 shell：会话跨工具调用存活，检测 shell 何时可以接收输入，并保留有界的逐行输出供读取。它提供 `shell` 后端类型，并通过 `shellDialect` 设置在 POSIX 上支持 bash、在 Windows 上支持 pwsh。通过已挂载的子进程提供方，同一个后端既可以与本地执行世界组合，也可以与远程执行世界组合。全屏终端应用不在其逐行约定的范围内。
+`dsh-terminal-bash` 启动持久交互式 shell：会话跨工具调用存活，检测 shell 何时可以接收输入，并保留有界的逐行输出供读取。它提供 `shell` 后端类型，并通过 `shellDialect` 设置在 POSIX 上支持 bash、在 Windows 上支持 pwsh。通过已挂载的子进程提供方，同一个后端既可以与本地执行世界组合，也可以与远程执行世界组合。全屏终端应用不在其逐行约定的范围内。
 
 ## 目录
 
@@ -25,7 +25,7 @@ kind: "package-reference"
 <a id="use-this-package"></a>
 ## 使用本包
 
-未显式指定初始目录的终端从所属 Session 的当前目录启动。沙箱权限根目录仍由 Session 策略控制。
+未显式指定初始目录的终端从所属 Session 的当前目录启动。
 
 当组合需要持久 shell 会话时挂载此后端——cwd、导出的变量、函数或正在运行的交互式子进程等状态必须跨工具调用存活。它是默认的 `shell` 类型：组合只挂载 `@deepseek-ai/dsh-terminal` 而不挂载它时，将没有任何会话可打开。
 
@@ -35,18 +35,16 @@ kind: "package-reference"
 
 ### 组合方式
 
-挂载终端服务、子进程提供方、沙箱与策略服务、此后端以及一个工具包：
+挂载终端服务、子进程提供方、此后端以及一个工具包：
 
 ```yaml
 - name: '@deepseek-ai/dsh-terminal'
 - name: '@deepseek-ai/dsh-subprocess-local'
-- name: '@deepseek-ai/dsh-sandbox-local'
-- name: '@deepseek-ai/dsh-sandbox-policy'
 - name: '@deepseek-ai/dsh-terminal-bash'
 - name: '@deepseek-ai/dsh-tool-terminal'
 ```
 
-`danger-full-access` 直接启动 shell。受限模式要求同一执行世界中存在 `ctx.sandbox` 提供方：缺少时，spawn 会在 shell 启动前失败。限制准备过程接收打开操作的取消信号；即使提供方稍后返回，取消仍会阻止终端分配。
+配置好的 shell 直接在所有者的执行世界中启动。打开操作会接收调用方的取消信号，因此即使提供方稍后返回，取消仍会阻止终端分配。
 
 ### 配置
 
@@ -65,13 +63,13 @@ kind: "package-reference"
 
 两种方言暴露相同的就绪约定，因此消费方与方言无关。当 shell 再次就绪时发送即结算：受控提示符被验证之后、前台进程组被证明在等待 stdin（Linux）之后、输出静默（`inferred_idle`）之后，或到达绝对 `timeoutMs`。若提示符标记已到达而其可打印尾部尚未到达，send 会在 `idleSilenceMs + handoffGraceMs` 之外继续等待 `promptTailGraceMs`，因为标记与尾部由同一次提示符渲染写出。`inferred_idle` 或 `timeout` 结果并不证明前台命令已退出。
 
-### 沙箱与安全运行
+### 环境与安全运行
 
-shell 在整个生命周期内运行在有效的沙箱边界之下。当所有者仍有打开的会话或进行中的 spawn 时，改变有效沙箱模式会被拒绝——请先等待创建完成并关闭会话，避免以更宽权限打开的终端在权限降级后继续存在。后端只提供终端专属的环境覆盖；共享凭据清理由子进程提供方负责。
+shell 在整个生命周期内都使用后端组装的环境运行。后端只提供终端专属的环境覆盖；共享凭据清理由子进程提供方负责。
 
 ### 可观察结果与失败
 
-打开会返回会话 id 与有界启动消息。发送以四种等待原因之一与一个会话状态结算；`session_exit` 表示顶层 shell 已退出。设置失败会拒绝打开：受限模式下缺少沙箱提供方、shell 在启动期间退出、shell 未能在启动超时前达到就绪，或调用方取消。清理失败会拒绝关闭，而不是声称成功。
+打开会返回会话 id 与有界启动消息。发送以四种等待原因之一与一个会话状态结算；`session_exit` 表示顶层 shell 已退出。设置失败会拒绝打开：shell 在启动期间退出、shell 未能在启动超时前达到就绪，或调用方取消。清理失败会拒绝关闭，而不是声称成功。
 
 -----
 
@@ -93,7 +91,7 @@ Scrollback 和尚未读取的发送输出保留独立拥有的字符串，并增
 
 | 文件 | 职责 |
 |---|---|
-| [`src/index.ts`](src/index.ts) | 后端注册、沙箱模式限制、argv 与环境组装、启动序列 |
+| [`src/index.ts`](src/index.ts) | 后端注册、argv 与环境组装、启动序列 |
 | [`src/config.ts`](src/config.ts) | 方言解析、默认值与每个计时字段的校验 |
 | [`src/session.ts`](src/session.ts) | `LocalPtySession`：发送生命周期、就绪轮询、scrollback、信号、关闭 |
 | [`src/sanitize.ts`](src/sanitize.ts) | 流式控制序列清理器与行规范化 |
@@ -105,10 +103,6 @@ Scrollback 和尚未读取的发送输出保留独立拥有的字符串，并增
 ### 发送取消与关闭
 
 取消先把排队输入标记为已取消，再在任何在途的提供方写入结算后向当前前台进程组发送真正的 `SIGINT`；它绝不会通过写入 `\x03` 模拟中断。关闭会停止就绪轮询、终止提供方拥有的进程树、等待完全停稳，并把活跃发送结算为 `session_exit`。
-
-### 沙箱模式限制
-
-当所有者存在打开的会话或进行中的 spawn 时，凡是会改变有效沙箱模式的写入都会在 `sandbox/mode` 事件提交前被拒绝。该限制绑定到确切所有者，并在保留现有会话的提供方重新加载后依然有效。
 
 </details>
 
@@ -145,20 +139,6 @@ Scrollback 和尚未读取的发送输出保留独立拥有的字符串，并增
 
 不会直接失效；消费方结果保持仅追加。
 
-### 沙箱策略上下文
-
-#### 模型看到什么
-
-组合此后端期间，`sandbox-policy` 归属方会向提示词贡献与具体能力无关的 `sandbox:policy` 运行时上下文子句。
-
-#### Token 影响
-
-后端挂载期间，请求中会包含该策略子句。
-
-#### KV Cache 影响
-
-常驻策略发生变化时，会在保留的历史之后追加一份取代先前状态的运行时上下文快照。
-
 ## 已知限制与延期工作
 
 <a id="known-limitations-and-deferred-work"></a>
@@ -168,7 +148,7 @@ Scrollback 和尚未读取的发送输出保留独立拥有的字符串，并增
 
 - **仅逐行输出**——headless xterm 只为终端协议响应维护控制序列状态。返回输出仍按行规范化；不支持全屏备用缓冲区交互。
 - **没有精确档时，就绪是启发式的**——精确 stdin 等待检测取决于已挂载的子进程提供方；无法证明该状态的提供方（macOS、Windows）按提示符标记与静默／超时就绪结算。
-- **受限沙箱中的 pwsh 引导**——提示符函数与 UTF-8 编码固定操作通过 `[Console]::` 写入，Windows ACL 沙箱的只读模式可能拒绝。若因此无法获得标记就绪状态，启动会在 `timeoutMs` 到期时拒绝，而不会发布不完整的 shell。
+- **pwsh 引导需要可用的控制台**——提示符函数与 UTF-8 编码固定操作通过 `[Console]::` 写入。当宿主控制台拒绝这些写入时，启动会在 `timeoutMs` 到期时拒绝，而不会发布不完整的 shell。
 - **清理保证属于提供方**——进程树清理是 `SubprocessTerminalHandle` 的约定，而不是此后端的。
 - **会话不随进程退出存活**——harness 重启会销毁所有会话。
 

@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-workflow-ptc",
-  "description": "Workflow orchestration in the shared sandboxed Node PTC runtime",
-  "version": "0.2.1-rc.2",
+  "description": "Workflow orchestration in the shared Node PTC runtime",
+  "version": "0.2.1-rc.2.nosandbox",
   "publishConfig": {
     "access": "public"
   },
@@ -37,8 +37,6 @@
     "@deepseek-ai/dsh-tools": "workspace:*",
     "@deepseek-ai/dsh-workflow": "workspace:*",
     "@deepseek-ai/dsh-ptc-runtime": "workspace:*",
-    "@deepseek-ai/dsh-sandbox": "workspace:*",
-    "@deepseek-ai/dsh-sandbox-policy": "workspace:*",
     "@deepseek-ai/dsh-working-directory": "workspace:*"
   },
   "dependencies": {
@@ -62,14 +60,11 @@
     "@deepseek-ai/dsh-workflow": "workspace:*",
     "@deepseek-ai/dsh-http-proxy": "workspace:*",
     "@deepseek-ai/dsh-ptc-runtime": "workspace:*",
-    "@deepseek-ai/dsh-sandbox": "workspace:*",
-    "@deepseek-ai/dsh-sandbox-policy": "workspace:*",
     "@deepseek-ai/dsh-ptc-runtime-node": "workspace:*",
     "@deepseek-ai/dsh-fs": "workspace:*",
     "@deepseek-ai/dsh-fs-local": "workspace:*",
     "@deepseek-ai/dsh-subprocess": "workspace:*",
     "@deepseek-ai/dsh-subprocess-local": "workspace:*",
-    "@deepseek-ai/dsh-sandbox-local": "workspace:*",
     "@deepseek-ai/dsh-session-persistence-jsonl": "workspace:*",
     "@deepseek-ai/dsh-working-directory": "workspace:*"
   }

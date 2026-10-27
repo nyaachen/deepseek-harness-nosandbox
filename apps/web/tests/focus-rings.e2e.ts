@@ -210,7 +210,7 @@ async function compileFixture(): Promise<{ script: string; css: string }> {
     import ${source('ui-theme/src/styles/design-platform.css')}
     import ${source('ui-theme/src/styles/focus.css')}
     import ${source('ui-theme/src/styles/gradient-shadow-text.css')}
-    import triggerCss from ${source('ui-permission-presets/src/client/PermissionSelect.module.css')}
+    import triggerCss from ${source('ui-model-selection/src/client/ModelSelect.module.css')}
     import feedbackCss from ${source('ui-message-feedback/src/client/FeedbackDialog.module.css')}
     import workflowCss from ${source('ui-workflow-run/src/client/WorkflowRunPanel.module.css')}
     import cardCss from ${source('ui-primitives/src/HoverCard.module.css')}

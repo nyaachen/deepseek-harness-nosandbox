@@ -1,7 +1,7 @@
 /**
  * Delegation policy through child session events appended before publication:
- * the parent's Auto identity and sandbox override plus the pinned
- * `approval/policy: never`.
+ * the pinned `approval/policy: never` and the deterministic rejection it forces
+ * on a delegated child's approval asks.
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -12,19 +12,17 @@ import { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import { mountAgentLoopTestDependencies } from '@deepseek-ai/dsh-agent-loop-testkit'
-import SandboxedFileSystem from '@deepseek-ai/dsh-fs-sandbox'
+import LocalFileSystem from '@deepseek-ai/dsh-fs-local'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
-import SandboxPolicyService, { setSandboxMode } from '@deepseek-ai/dsh-sandbox-policy'
-import { Session, SessionId, type SessionEvent } from '@deepseek-ai/dsh-session'
+import { SessionId, type SessionEvent } from '@deepseek-ai/dsh-session'
 import * as ToolFs from '@deepseek-ai/dsh-tool-fs'
-import ApprovalService from '@deepseek-ai/dsh-user-approval'
+import ApprovalService, { setApprovalPolicy } from '@deepseek-ai/dsh-user-approval'
 import { MockAdapter, textResponse, toolCallResponse } from '../../../core/agent-loop/tests/mock-adapter.ts'
 import SubagentRuntime from '@deepseek-ai/dsh-subagent'
 import { mountLocalActivations, startPreparedActivation } from './local-activation.ts'
 
 type Script = ConstructorParameters<typeof MockAdapter>[0]
 
-const READ_ONLY_DENIAL = '[sandbox: file access denied under read-only mode]'
 const contexts: Context[] = []
 let workspace: string
 
@@ -43,8 +41,7 @@ async function setupWalled(script: Script): Promise<{ ctx: Context; parent: Agen
   await mountAgentLoopTestDependencies(ctx)
   await mountLocalActivations(ctx)
   await ctx.plugin(SubagentRuntime)
-  await ctx.plugin(SandboxPolicyService, { mode: 'workspace-write', workspaceRoot: workspace })
-  await ctx.plugin(SandboxedFileSystem, { cwd: workspace })
+  await ctx.plugin(LocalFileSystem, { cwd: workspace })
   await ctx.plugin(ToolFs)
   await ctx.plugin(ApprovalService)
   await ctx.plugin(AgentLoop, { agents: [] })
@@ -77,71 +74,15 @@ function toolResultTexts(agent: Agent): string[] {
 }
 
 describe('in-process policy inheritance', () => {
-  it.each(['auto', 'danger-full-access'] as const)(
-    'records the parent %s identity before publishing a DSH in-process child',
-    async (preset) => {
-      const { ctx, parent } = await setupWalled([textResponse('child done')])
-      parent.session.append('permission/preset', { preset })
-      setSandboxMode(parent.session, 'danger-full-access')
-      ctx.provide('permissionPresets', {
-        current: (session: Session) => session === parent.session ? preset : 'custom',
-      } as never)
-
-      const run = await startPreparedActivation(spawnRequest(parent), {})
-      try {
-        await run.result
-        const child = run.localAgent
-        expect(child.session.snapshotEvents().slice(1, 4)).toMatchObject([
-          { type: 'sandbox/mode', seq: 1, data: { mode: 'danger-full-access', source: 'delegation' } },
-          { type: 'approval/policy', seq: 2, data: { policy: 'never', source: 'delegation' } },
-          { type: 'permission/preset', seq: 3, data: { preset } },
-        ])
-      } finally {
-        await run.dispose()
-      }
-    },
-  )
-
-  it.each([
-    { seedPreset: 'auto', preset: 'danger-full-access' },
-    { seedPreset: 'danger-full-access', preset: 'auto' },
-  ] as const)('captures $preset before child creation and overrides the $seedPreset fork prefix', async ({ seedPreset, preset }) => {
-    const { ctx, parent } = await setupWalled([textResponse('child done')])
-    parent.session.append('permission/preset', { preset: seedPreset })
-    setSandboxMode(parent.session, 'danger-full-access')
-    const seed = parent.session.snapshotEvents()
-    parent.session.append('permission/preset', { preset })
-    let currentPreset: 'auto' | 'danger-full-access' = preset
-    ctx.provide('permissionPresets', {
-      current: (session: Session) => session === parent.session ? currentPreset : 'custom',
-    } as never)
-
-    const starting = startPreparedActivation(spawnRequest(parent), { seed })
-    currentPreset = seedPreset
-    parent.session.append('permission/preset', { preset: seedPreset })
-    const run = await starting
-    try {
-      await run.result
-      const child = run.localAgent
-      expect(child.session.snapshotEvents().filter(event => event.type === 'permission/preset')).toMatchObject([
-        { data: { preset: seedPreset } },
-        { data: { preset } },
-      ])
-    } finally {
-      await run.dispose()
-    }
-  })
-
-  it('records the parent sandbox override and the approval pin before publishing a spawn child', async () => {
+  it('pins approval to never before publishing a spawn child', async () => {
     const script: Script = []
     const { ctx, parent } = await setupWalled(script)
-    const blocked = join(workspace, 'spawn-blocked.txt')
-    setSandboxMode(parent.session, 'read-only')
+    const allowed = join(workspace, 'spawn-allowed.txt')
     // No parent approval override: the child pin must not depend on one.
     expect(ctx.approval.overrideOf(parent.session)).toBeUndefined()
     const parentLogLength = parent.session.snapshotEvents().length
     script.push(
-      toolCallResponse('write', 'write', { file_path: blocked, content: 'escaped' }),
+      toolCallResponse('write', 'write', { file_path: allowed, content: 'fine' }),
       textResponse('child done'),
     )
 
@@ -150,17 +91,14 @@ describe('in-process policy inheritance', () => {
       const result = await run.result
       const child = run.localAgent
 
-      await expect(readFile(blocked, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
-      expect(toolResultTexts(child).join('\n')).toContain(READ_ONLY_DENIAL)
+      expect(await readFile(allowed, 'utf8')).toBe('fine')
       expect(result.stopReason).toBe('completed')
-      expect(child.session.snapshotEvents().slice(1, 3)).toMatchObject([
-        { type: 'sandbox/mode', seq: 1, data: { mode: 'read-only', source: 'delegation' } },
-        { type: 'approval/policy', seq: 2, data: { policy: 'never', source: 'delegation' } },
+      expect(child.session.snapshotEvents().filter(event => event.type === 'approval/policy')).toMatchObject([
+        { seq: 1, data: { policy: 'never', source: 'delegation' } },
       ])
       expect(child.session.firstLiveSeq).toBe(0)
       expect(child.session.header.isSeeded).toBe(false)
       expect(child.session.inheritedEventCount).toBe(0)
-      expect(ctx.sandboxPolicy.overrideOf(child.session)).toBe('read-only')
       expect(ctx.approval.overrideOf(child.session)).toBe('never')
       const request = child.session.snapshotEvents().find(
         (event): event is SessionEvent<'request/header'> => event.type === 'request/header',
@@ -181,7 +119,6 @@ describe('in-process policy inheritance', () => {
         .filter((block): block is Extract<ContentBlock, { type: 'text' }> => block.type === 'text')
         .map(block => block.text)
         .join('\n')
-      expect(contextText).toContain('Current DSH file policy: read-only')
       expect(contextText).toContain('Approval prompts are disabled')
       // The statement rides runtime context; the system node (surface node 0) stays uniform.
       expect(contextText).toContain('You are a delegated subagent')
@@ -200,15 +137,16 @@ describe('in-process policy inheritance', () => {
     }
   })
 
-  it('places inherited events after a fork prefix so fresh policy wins stale seed state', async () => {
+  it('places the delegated event after a fork prefix so fresh policy wins stale seed state', async () => {
     const script: Script = []
     const { ctx, parent } = await setupWalled(script)
-    const blocked = join(workspace, 'fork-blocked.txt')
-    setSandboxMode(parent.session, 'workspace-write')
+    const allowed = join(workspace, 'fork-allowed.txt')
+    // The stale policy lands inside the prefix the fork seed replays.
+    setApprovalPolicy(parent.session, 'ask')
     const seed = parent.session.snapshotEvents()
-    setSandboxMode(parent.session, 'read-only')
+    setApprovalPolicy(parent.session, 'never')
     script.push(
-      toolCallResponse('write', 'write', { file_path: blocked, content: 'escaped' }),
+      toolCallResponse('write', 'write', { file_path: allowed, content: 'fine' }),
       textResponse('child done'),
     )
 
@@ -220,64 +158,22 @@ describe('in-process policy inheritance', () => {
       expect(child.session.header.isSeeded).toBe(true)
       expect(child.session.inheritedEventCount).toBe(1)
       expect(child.session.firstLiveSeq).toBe(seed.length)
-      // seq 1 is the constructor's end-seed marker.
-      expect(child.session.snapshotEvents().filter(event => event.type === 'sandbox/mode')).toMatchObject([
-        { seq: 0, data: { mode: 'workspace-write' } },
-        { seq: 3, data: { mode: 'read-only', source: 'delegation' } },
-      ])
-      await expect(readFile(blocked, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
-      expect(ctx.sandboxPolicy.overrideOf(child.session)).toBe('read-only')
-
-      setSandboxMode(child.session, 'danger-full-access')
-      expect(ctx.sandboxPolicy.overrideOf(child.session)).toBe('danger-full-access')
-    } finally {
-      await run.dispose()
-    }
-  })
-
-  it('captures policy at delegation before asynchronous child creation', async () => {
-    const script: Script = [textResponse('child done')]
-    const { ctx, parent } = await setupWalled(script)
-    setSandboxMode(parent.session, 'read-only')
-
-    const starting = startPreparedActivation(spawnRequest(parent), {})
-    setSandboxMode(parent.session, 'danger-full-access')
-    const run = await starting
-    try {
-      await run.result
-      const child = run.localAgent
-      expect(ctx.sandboxPolicy.overrideOf(parent.session)).toBe('danger-full-access')
-      expect(ctx.sandboxPolicy.overrideOf(child.session)).toBe('read-only')
-    } finally {
-      await run.dispose()
-    }
-  })
-
-  it('leaves an unswitched sandbox on the deployment default while still pinning approval', async () => {
-    const script: Script = []
-    const { parent } = await setupWalled(script)
-    const allowed = join(workspace, 'default-allowed.txt')
-    script.push(
-      toolCallResponse('write', 'write', { file_path: allowed, content: 'fine' }),
-      textResponse('child done'),
-    )
-
-    const run = await startPreparedActivation(spawnRequest(parent), {})
-    try {
-      await run.result
-      const child = run.localAgent
+      const policyEvents = child.session.snapshotEvents().filter(event => event.type === 'approval/policy')
+      expect(policyEvents.map(event => event.data.policy)).toEqual(['ask', 'never'])
+      const delegation = policyEvents.at(-1)!
+      expect(delegation.data).toEqual({ policy: 'never', source: 'delegation' })
+      expect(delegation.seq).toBeGreaterThanOrEqual(child.session.firstLiveSeq)
       expect(await readFile(allowed, 'utf8')).toBe('fine')
-      expect(child.session.snapshotEvents().some(event => event.type === 'sandbox/mode')).toBe(false)
-      expect(child.session.snapshotEvents().filter(event => event.type === 'approval/policy')).toMatchObject([
-        { seq: 1, data: { policy: 'never', source: 'delegation' } },
-      ])
-      expect(child.session.firstLiveSeq).toBe(0)
+      expect(ctx.approval.overrideOf(child.session)).toBe('never')
+
+      setApprovalPolicy(child.session, 'ask')
+      expect(ctx.approval.overrideOf(child.session)).toBe('ask')
     } finally {
       await run.dispose()
     }
   })
 
-  it('rejects a child escalation deterministically even when an answerer would allow it', async () => {
+  it('rejects a delegated child approval ask deterministically even when an answerer would allow it', async () => {
     const script: Script = []
     const { ctx, parent } = await setupWalled(script)
     // A granting answerer proves the pin resolves before any answerer runs.
@@ -286,15 +182,14 @@ describe('in-process policy inheritance', () => {
       consulted = true
       return Promise.resolve('allowed-once' as const)
     })
+    // The tool-level gate asks for one tool, so the ask reaches the approval seam.
+    ctx.on('tools/pre-execute', async (exec, next) => {
+      if (exec.name !== 'write') return next()
+      return { kind: 'ask', reason: 'the fixture requires approval for write' }
+    })
     const blocked = join(workspace, 'escalation-blocked.txt')
-    setSandboxMode(parent.session, 'read-only')
     script.push(
-      toolCallResponse('write', 'write', {
-        file_path: blocked,
-        content: 'escaped',
-        sandbox_permissions: 'workspace-write',
-        justification: 'test escalation from a delegated child',
-      }),
+      toolCallResponse('write', 'write', { file_path: blocked, content: 'escaped' }),
       textResponse('child done'),
     )
 
@@ -305,8 +200,7 @@ describe('in-process policy inheritance', () => {
 
       await expect(readFile(blocked, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
       expect(consulted).toBe(false)
-      expect(toolResultTexts(child).join('\n'))
-        .toContain('the user rejected escalating this operation to "workspace-write"')
+      expect(toolResultTexts(child).join('\n')).toContain('the user rejected tool "write"')
       const asked = child.session.snapshotEvents().find(
         (event): event is SessionEvent<'approval/asked'> => event.type === 'approval/asked',
       )

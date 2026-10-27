@@ -8,17 +8,13 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent, AgentOptions, CreateAgentOptions } from '@deepseek-ai/dsh-agent'
-import type { SandboxMode } from '@deepseek-ai/dsh-sandbox'
 import type { Session, SessionId } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-system-prompt'
 import type { ToolRestriction } from '@deepseek-ai/dsh-tools'
-// Type-only: make `ctx.get('sandboxPolicy')`, `ctx.get('approval')`, and
-// `ctx.get('permissionPresets')` resolve to their services when composed — delegation consumes them
-// opportunistically (the documented `ctx.get` pattern), never as a hard dep —
-// and merge the inherited permission session-event payloads.
-import type {} from '@deepseek-ai/dsh-sandbox-policy'
+// Type-only: make `ctx.get('approval')` resolve to its service when composed —
+// delegation consumes it opportunistically (the documented `ctx.get` pattern),
+// never as a hard dep — and merge the inherited approval session-event payload.
 import type {} from '@deepseek-ai/dsh-user-approval'
-import type {} from '@deepseek-ai/dsh-permission-presets'
 // Type-only: make `ctx.get('agentPresets')` resolve to the preset roster when
 // composed — a child inherits its parent's composition opportunistically (the
 // documented `ctx.get` pattern), never as a hard dep. A rosterless deployment
@@ -220,46 +216,33 @@ function applyChildOverrides(childCtx: Context, composition: ChildComposition): 
 /** Policy seeded onto a child session's log at the delegation boundary. */
 export interface DelegatedPolicyOverrides {
   /**
-   * The parent's current preset identity when it runs in Auto or Full access;
-   * the child keeps it under the pinned `never` approval policy.
-   */
-  readonly permissionPreset: 'auto' | 'danger-full-access' | undefined
-  /** The parent session's explicit sandbox-mode override, or `undefined` without one. */
-  readonly sandboxMode: SandboxMode | undefined
-  /**
    * `'never'` whenever the approval capability is composed, `undefined`
-   * otherwise: a delegated child acts only within the sandbox scope fixed at
-   * delegation, so its asks are rejected deterministically.
+   * otherwise: a delegated child's permission scope is fixed at delegation,
+   * so its asks are rejected deterministically.
    */
   readonly approvalPolicy: 'never' | undefined
 }
 
 /**
  * Capture the permission state to seed into one delegation. Call synchronously before
- * the child start's first await: a later parent switch belongs to the
- * parent's future, not to this child. Auto and Full access identities are
- * inherited only through the in-process DSH path so either can replace a stale
- * same-bundle fork value. Only the parent session's explicit sandbox override
- * is captured — never deployment defaults or one-shot grants — and the approval
- * policy is pinned to `'never'` regardless of the parent's own policy.
+ * the child start's first await: a later parent change belongs to the parent's
+ * future, not to this child. The approval policy is pinned to `'never'`
+ * regardless of the parent's own policy.
  * @param parent - the delegating parent agent.
- * @returns the sandbox override (or `undefined` without one) and the approval pin.
+ * @returns the approval pin, or `undefined` without a composed approval service.
  */
 export function captureDelegatedPolicyOverrides(parent: Agent): DelegatedPolicyOverrides {
-  const preset = parent.ctx.get('permissionPresets')?.current(parent.session)
   return {
-    permissionPreset: preset === 'auto' || preset === 'danger-full-access' ? preset : undefined,
-    sandboxMode: parent.ctx.get('sandboxPolicy')?.overrideOf(parent.session),
     approvalPolicy: parent.ctx.get('approval') === undefined ? undefined : 'never',
   }
 }
 
 /**
- * Append the captured delegation policy onto the child's own log as
- * `source: 'delegation'` events inside the unpublished creation window, so the
- * child's effective policy is reconstructable from its log alone. Appends land
- * after any fork seed, so fresh policy wins stale seed state; later child
- * switches still win over these events.
+ * Append the captured delegation policy onto the child's own log as a
+ * `source: 'delegation'` event inside the unpublished creation window, so the
+ * child's effective policy is reconstructable from its log alone. The append lands
+ * after any fork seed, so fresh policy wins stale seed state; a later child
+ * switch still wins over this event.
  * @param childSession - the unpublished child's session.
  * @param overrides - the policy captured at delegation.
  */
@@ -267,14 +250,8 @@ export function appendDelegatedPolicyOverrides(
   childSession: Session,
   overrides: DelegatedPolicyOverrides,
 ): void {
-  if (overrides.sandboxMode !== undefined) {
-    childSession.append('sandbox/mode', { mode: overrides.sandboxMode, source: 'delegation' })
-  }
   if (overrides.approvalPolicy !== undefined) {
     childSession.append('approval/policy', { policy: overrides.approvalPolicy, source: 'delegation' })
-  }
-  if (overrides.permissionPreset !== undefined) {
-    childSession.append('permission/preset', { preset: overrides.permissionPreset })
   }
 }
 

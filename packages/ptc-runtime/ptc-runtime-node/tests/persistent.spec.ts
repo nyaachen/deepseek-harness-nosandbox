@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -67,6 +68,16 @@ describe('persistent Node REPL', () => {
     expect(second).toHaveBeenCalledTimes(1)
     expect((await run('let failure; try { await query() } catch (error) { console.log(error.toolName); failure = "unavailable" }; failure')).value).toBe('unavailable')
     expect(second).toHaveBeenCalledTimes(1)
+  })
+
+  it('preserves the current execution context for bindings in a reused REPL', async () => {
+    const { run } = await setup()
+    const context = new AsyncLocalStorage<string>()
+    const scoped = (program: string) => run(program, {
+      bindings: [{ global: 'tools', functions: { current: async () => context.getStore() ?? null } }],
+    })
+    expect((await context.run('first', () => scoped('var retained = await tools.current({}); retained'))).value).toBe('first')
+    expect((await context.run('second', () => scoped('await tools.current({})'))).value).toBe('second')
   })
 
   it('runs top-level await blocks with reusable local declarations and keeps outer state', async () => {
@@ -226,12 +237,11 @@ describe('persistent Node REPL', () => {
     await expect(runtime.run({ program: '1', bindings: [], cwd: process.cwd(), timeoutMs: null })).rejects.toThrow('after disposal')
   })
 
-  it('resolves confinement and validates options before starting a process', async () => {
+  it('validates resolved options before starting a process', async () => {
     const { run, runtime } = await setup()
-    expect(runtime.sandboxMode).toBe('danger-full-access')
     expect(runtime.programFormat).toBe('repl')
     expect(runtime.timeout).toEqual({ defaultMs: 120_000, maxMs: 600_000 })
-    expect(runtime.resolve({ program: '1', bindings: [], sandboxPolicy: { mode: 'read-only', workspaceRoot: process.cwd() } }).sandboxPolicy?.mode).toBe('read-only')
+    expect(runtime.resolve({ program: '1', bindings: [], cwd: process.cwd() }).cwd).toBe(process.cwd())
     expect(() => runtime.resolve({ program: '1', bindings: [], cwd: 'relative' })).toThrow('absolute')
     expect(() => runtime.resolve({ program: '1', bindings: [], timeoutMs: 0 })).toThrow()
     await expect(run('1', { bindings: [{ global: 'console', functions: {} }] })).rejects.toThrow('reserved')

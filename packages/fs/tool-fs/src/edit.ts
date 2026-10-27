@@ -13,7 +13,6 @@ import { computeHunkDiffs, diffsFromMeta } from './diff.ts'
 import { remediateFsError } from './error.ts'
 import { mutationResult } from './mutation-result.ts'
 import { sessionResolveOptions } from './session-cwd.ts'
-import type { FsSandboxController } from './sandbox.ts'
 
 /** Validated `edit` arguments after defaulting. */
 interface EditInput {
@@ -24,17 +23,13 @@ interface EditInput {
 }
 
 /**
- * The `edit` tool's validated arguments: the base parameters plus the two
- * escalation fields, advertised only under a confining `ctx.fs` (absent from
- * the schema otherwise, so the validator rejects them before `execute`).
+ * The `edit` tool's validated arguments, matching its advertised parameters.
  */
 interface EditToolArgs {
   file_path: string
   old_string: string
   new_string: string
   replace_all?: boolean
-  sandbox_permissions?: string
-  justification?: string
 }
 
 /**
@@ -71,9 +66,8 @@ export function formatEditOutput(displayPath: string, replaceAll: boolean): stri
 /**
  * Register the `edit` tool and its scope-aware system-prompt guidance.
  * @param ctx - the plugin context; registrations are effects scoped to it, and execution uses its `fs` service.
- * @param sandbox - the shared sandbox-escalation API (advertisement, mode stamping, denial mapping).
  */
-export function applyEditTool(ctx: Context, sandbox: FsSandboxController): void {
+export function applyEditTool(ctx: Context): void {
   ctx.systemPrompt.section({
     name: 'tool:edit',
     order: ctx.systemPrompt.getSectionOrder('TOOL_EDIT'),
@@ -94,7 +88,6 @@ export function applyEditTool(ctx: Context, sandbox: FsSandboxController): void 
       old_string: { type: 'string', required: true, description: 'Literal text to replace.' },
       new_string: { type: 'string', required: true, description: 'Literal replacement text. Use an empty string to delete the match.' },
       replace_all: { type: 'boolean', description: 'Replace all matches. Defaults to false; when false, old_string must appear exactly once.' },
-      ...sandbox.escalationModes.length > 0 ? sandbox.schemaFields() : {},
     },
     output: {
       schema: {
@@ -118,9 +111,6 @@ export function applyEditTool(ctx: Context, sandbox: FsSandboxController): void 
     },
     async execute(args: EditToolArgs, exec) {
       const input = parseEditArgs(args)
-      // Resolve the per-call sandbox policy (approved mode > session override
-      // > backend default, plus the session cwd root) BEFORE anything executes.
-      const sandboxPolicy = await sandbox.resolvePolicy('edit', args, exec)
       const target = await ctx.fs.resolve(input.filePath, await sessionResolveOptions(ctx, exec))
       // Single-slot decision: the policy plugin returns { version: vObserved } or
       // throws FS_NOT_OBSERVED; the bare default is undefined (unconditional edit).
@@ -136,13 +126,11 @@ export function applyEditTool(ctx: Context, sandbox: FsSandboxController): void 
           { oldString: input.oldString, newString: input.newString, replaceAll: input.replaceAll },
           intent,
           exec.signal,
-          sandboxPolicy,
         )
       } catch (error: unknown) {
-        // A sandbox denial becomes the shared [sandbox: …] marker (the model
-        // recognizes it from bash); guarded mutation failures receive their
-        // stable model-facing diagnostic; anything else passes through.
-        throw remediateFsError(sandbox.mapError(error, sandboxPolicy), target.displayPath)
+        // Guarded mutation failures receive their stable model-facing diagnostic;
+        // anything else passes through.
+        throw remediateFsError(error, target.displayPath)
       }
       return mutationResult(ctx, target, outcome, exec)
     },

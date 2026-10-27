@@ -11,29 +11,12 @@
     "src/changes.ts"
   ],
   "references": [
-    {
-      "path": "../../../vendor/cordis"
-    },
-    {
-      "path": "../../../vendor/schemastery"
-    },
-    {
-      "path": "../../core/session"
-    },
-    {
-      "path": "../../fs/fs"
-    },
-    {
-      "path": "../../sandbox/sandbox-policy"
-    },
-    {
-      "path": "../../session/session-persistence"
-    },
-    {
-      "path": "../../typert/protocol"
-    },
-    {
-      "path": "../../util/deque"
-    }
+    { "path": "../../../vendor/cordis" },
+    { "path": "../../../vendor/schemastery" },
+    { "path": "../../core/session" },
+    { "path": "../../fs/fs" },
+    { "path": "../../session/session-persistence" },
+    { "path": "../../typert/protocol" },
+    { "path": "../../util/deque" }
   ]
 }

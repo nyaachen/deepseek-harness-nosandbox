@@ -3,7 +3,6 @@ import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-api-session-controller'
 import type {} from '@deepseek-ai/dsh-api-workspace-files'
 import type {} from '@deepseek-ai/dsh-fs'
-import type {} from '@deepseek-ai/dsh-sandbox-policy'
 import { remoteErrorOf } from '@deepseek-ai/dsh-typert-protocol'
 import type {} from '@deepseek-ai/dsh-client-connection'
 import type {} from '@deepseek-ai/dsh-session-query'
@@ -118,7 +117,7 @@ async function handlePresentOpen(ctx: Context, request: Request): Promise<Respon
     request.signal.throwIfAborted()
     const { absolutePath: path } = await ctx.workspaceFiles.stat({
       sessionId: id as SessionId,
-      workspaceRoot: session.cwd ?? ctx.sandboxPolicy.workspaceRoot,
+      workspaceRoot: session.cwd ?? process.cwd(),
     }, file.path, request.signal)
     return await openVerified(ctx, request, path, action)
   } catch (error: unknown) {

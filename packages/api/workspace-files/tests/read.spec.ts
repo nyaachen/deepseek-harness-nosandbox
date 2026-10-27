@@ -143,7 +143,7 @@ describe('workspaceFiles.read — read access and file kinds', () => {
 
   it('preserves a filesystem provider refusal for an outside file', async () => {
     await writeFile(join(outside, 'notes.txt'), 'outside', 'utf8')
-    const refusal = new FsError('backend denied read', 'FS_SANDBOX_DENIED')
+    const refusal = new FsError('backend denied read', 'FS_PERMISSION_DENIED')
     vi.spyOn(harness.ctx.fs, 'streamText').mockRejectedValue(refusal)
     await expect(endpoint().read(harness.scope, join(outside, 'notes.txt'), {}, signal())).rejects.toBe(refusal)
   })

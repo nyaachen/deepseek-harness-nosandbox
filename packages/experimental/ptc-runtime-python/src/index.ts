@@ -1,9 +1,9 @@
 /**
  * CPython subprocess PTC runtime: a fresh `python3` process runs each model program under an
  * asyncio event loop with top-level ``await``. Binding calls travel on fd 3 as JSON-lines,
- * leaving stdout/stderr free for the program's own output. Direct file effects follow the
- * shared sandbox policy; CPU, address-space, output, and wall-clock budgets bound each run.
- * Process-group teardown sends SIGTERM followed by SIGKILL after the configured grace.
+ * leaving stdout/stderr free for the program's own output. CPU, address-space, output, and
+ * wall-clock budgets bound each run. Process-group teardown sends SIGTERM followed by SIGKILL
+ * after the configured grace.
  *
  * The package also owns the versionless fd-3 wire protocol itself; its host-side codec and
  * hostile-frame validators are re-exported so every consumer of the wire shares one vocabulary.
@@ -19,12 +19,9 @@ import type { Duplex } from 'node:stream'
 import { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { PtcRuntime, DUNDER_MEMBER, PORTABLE_RESERVED_WORDS, RESERVED_BINDING_GLOBALS, RESERVED_ERROR_MEMBERS } from '@deepseek-ai/dsh-ptc-runtime'
-import type { PtcBindingErrorClass, PtcBindingFunction, PtcJsonValue, PtcRunFailure, PtcRunRequest, PtcRunResult, PtcRunSandbox, PtcRunSpec } from '@deepseek-ai/dsh-ptc-runtime'
+import type { PtcBindingErrorClass, PtcBindingFunction, PtcJsonValue, PtcRunFailure, PtcRunRequest, PtcRunResult, PtcRunSpec } from '@deepseek-ai/dsh-ptc-runtime'
 import { snapshotJsonValue } from '@deepseek-ai/dsh-util-values'
 import { MAX_TIMER_DELAY_MS } from '@deepseek-ai/dsh-timeout'
-import { SandboxUnavailableError, classifyRunnerFailure, isRunnerSpawnFailure } from '@deepseek-ai/dsh-sandbox'
-import type { ConfinedArgv, SandboxMode } from '@deepseek-ai/dsh-sandbox'
-import type {} from '@deepseek-ai/dsh-sandbox-policy'
 import { bootstrapInput, PYTHON_BOOTSTRAP_LOADER } from './launch.ts'
 import type { BootMessage, ChildToHost, ReplyMessage } from './protocol.ts'
 import { checkDoneValue, encodeJsonPlain, hasUnsafeIntegerToken, logTruncationMarker, validateChildFrame } from './protocol.ts'
@@ -742,7 +739,6 @@ interface LiveRun {
  * `AbortSignal`; every disposer awaits child-process exit.
  */
 export class PythonPtcRuntime extends PtcRuntime {
-  static inject = ['sandbox', 'sandboxPolicy']
   static Config: z<Config> = z.object({
     cpuSeconds: z.number().default(60),
     maxWallMs: z.number().default(600_000),
@@ -756,10 +752,8 @@ export class PythonPtcRuntime extends PtcRuntime {
   readonly language = 'python'
   readonly isolation = 'process'
 
-  override get sandboxMode(): SandboxMode { return this.ctx.sandboxPolicy.defaultMode }
-
   override get executionInstructions(): string {
-    return 'The program is the body of an async Python function. Top-level await and return are supported. Emit output with print(...) or return a lossless JSON value. Only printed values and the returned value become program output. Each call runs in a fresh Python process; variables and imported modules do not persist across calls. Relative paths use the supplied working directory; only TMPDIR is set in the environment. Direct filesystem access follows this execution\'s sandbox policy.'
+    return 'The program is the body of an async Python function. Top-level await and return are supported. Emit output with print(...) or return a lossless JSON value. Only printed values and the returned value become program output. Each call runs in a fresh Python process; variables and imported modules do not persist across calls. Relative paths use the supplied working directory; only TMPDIR is set in the environment.'
   }
 
   private readonly config: ResolvedConfig
@@ -971,33 +965,30 @@ export class PythonPtcRuntime extends PtcRuntime {
   }
 
   /**
-   * Resolve authority, directory, and the configured wall deadline.
-   * @param request - Program inputs and optional resolved sandbox authority; timeout overrides are unsupported.
+   * Resolve the directory and the configured wall deadline.
+   * @param request - Program inputs; timeout overrides are unsupported.
    * @returns Complete inputs for the provider's run method.
    * @throws When a requested timeout is unsupported, cwd is relative, or the provider is disposed.
    */
   resolve(request: PtcRunRequest): PtcRunSpec {
     if (this.disposed) throw new Error('dsh-ptc-runtime-python: resolve() after disposal')
     if (request.timeoutMs !== undefined) throw new Error('dsh-ptc-runtime-python: per-call timeout is unsupported')
-    const sandboxPolicy = request.sandboxPolicy ?? this.ctx.sandboxPolicy.resolve()
-    const cwd = request.cwd ?? sandboxPolicy.workspaceRoot
+    // The provider process directory serves a caller that supplies no directory of its own.
+    const cwd = request.cwd ?? process.cwd()
     if (!isAbsolute(cwd)) throw new Error('dsh-ptc-runtime-python: cwd must be absolute')
-    return { ...request, cwd, sandboxPolicy, timeoutMs: this.config.maxWallMs }
+    return { ...request, cwd, timeoutMs: this.config.maxWallMs }
   }
 
   /**
-   * Execute a resolved Python program under its file policy and configured resource budgets.
-   * @param request - Resolved authority, cwd, provider deadline, program, and bindings.
-   * @returns Captured output, confinement facts, and the program outcome.
+   * Execute a resolved Python program under the configured resource budgets.
+   * @param request - Resolved cwd, provider deadline, program, and bindings.
+   * @returns Captured output and the program outcome.
    */
   async run(request: PtcRunSpec): Promise<PtcRunResult> {
-    if (request.sandboxPolicy === undefined) throw new Error('dsh-ptc-runtime-python: run requires a resolved sandbox policy')
     if (request.timeoutMs !== this.config.maxWallMs) throw new Error('dsh-ptc-runtime-python: unsupported execution timeout')
     if (!isAbsolute(request.cwd)) throw new Error('dsh-ptc-runtime-python: cwd must be absolute')
     if (this.disposed) throw new Error('dsh-ptc-runtime-python: run() after disposal')
     const bindings = this.validateBindings(request)
-    const policy = request.sandboxPolicy
-    const sandbox: PtcRunSandbox = { mode: policy.mode, denied: false }
     const controller = new AbortController()
     const completion = Promise.withResolvers<void>()
     const live: LiveRun = { controller, finished: completion.promise }
@@ -1021,32 +1012,19 @@ export class PythonPtcRuntime extends PtcRuntime {
       try {
         input = bootstrapInput()
       } catch (error: unknown) {
-        return { logs: [], sandbox, error: { kind: 'worker-exit', message: `failed to read the python bootstrap: ${messageOf(error)}` } }
+        return { logs: [], error: { kind: 'worker-exit', message: `failed to read the python bootstrap: ${messageOf(error)}` } }
       }
-      let confined: ConfinedArgv | undefined
       // Unbuffered native output stays observable before process-group teardown.
-      let argv: [string, ...string[]] = [this.pythonBin, '-u', '-I', '-c', PYTHON_BOOTSTRAP_LOADER]
-      if (policy.mode !== 'danger-full-access') {
-        confined = await this.ctx.sandbox.confine(argv, { ...policy, mode: policy.mode }, controller.signal)
-        controller.signal.throwIfAborted()
-        sandbox.enforcement = confined.enforcement
-        // The launcher uses the deployment PATH; model code still receives only TMPDIR.
-        const runner = confined.argv[0]
-        if (runner === undefined) throw new SandboxUnavailableError(policy.mode, 'sandbox runner argv is empty')
-        const executable = resolvePythonBin(runner)
-        if (executable === undefined) throw new SandboxUnavailableError(policy.mode, `sandbox runner is not executable: ${confined.argv[0]}`)
-        argv = [executable, ...confined.argv.slice(1)]
-        confined = { ...confined, argv }
-      }
+      const argv: [string, ...string[]] = [this.pythonBin, '-u', '-I', '-c', PYTHON_BOOTSTRAP_LOADER]
       controller.signal.throwIfAborted()
-      const pending = this.execute({ ...request, signal: controller.signal }, bindings, argv, input, sandbox, confined, complete)
+      const pending = this.execute({ ...request, signal: controller.signal }, bindings, argv, input, complete)
       launched = true
       return await pending
     } catch (error: unknown) {
       return {
-        logs: [], sandbox,
+        logs: [],
         error: controller.signal.aborted ? controller.signal.reason as PtcRunFailure
-          : { kind: error instanceof SandboxUnavailableError ? 'sandbox-unavailable' : 'worker-exit', message: messageOf(error) },
+          : { kind: 'worker-exit', message: messageOf(error) },
       }
     } finally {
       clearTimeout(wallTimer)
@@ -1149,14 +1127,12 @@ export class PythonPtcRuntime extends PtcRuntime {
     return bindings
   }
 
-  /** Spawn one confined program and retain ownership until its process group settles. */
+  /** Spawn one program and retain ownership until its process group settles. */
   private execute(
     request: PtcRunSpec & { signal: AbortSignal },
     bindings: Map<string, ValidatedNamespace>,
     argv: [string, ...string[]],
     input: string,
-    sandbox: PtcRunSandbox,
-    confined: ConfinedArgv | undefined,
     complete: () => void,
   ): Promise<PtcRunResult> {
     let child: ChildProcessWithoutNullStreams
@@ -1175,8 +1151,8 @@ export class PythonPtcRuntime extends PtcRuntime {
       }
     } catch (error: unknown) {
       complete()
-      return Promise.resolve({ logs: [], sandbox, error: {
-        kind: confined !== undefined && isRunnerSpawnFailure(error, argv[0], request.cwd) ? 'sandbox-unavailable' : 'worker-exit',
+      return Promise.resolve({ logs: [], error: {
+        kind: 'worker-exit',
         message: `python spawn error: ${messageOf(error)}`,
       } })
     }
@@ -1457,13 +1433,7 @@ export class PythonPtcRuntime extends PtcRuntime {
         }
       }
       child.stdout.on('data', (chunk: Buffer) => { captureStray(strayOut, chunk) })
-      let runnerStderr = Buffer.alloc(0)
-      child.stderr.on('data', (chunk: Buffer) => {
-        if (confined !== undefined) {
-          runnerStderr = Buffer.concat([runnerStderr, chunk]).subarray(-this.config.maxLogBytes)
-        }
-        captureStray(strayErr, chunk)
-      })
+      child.stderr.on('data', (chunk: Buffer) => { captureStray(strayErr, chunk) })
       child.stdout.on('end', () => { flushStray(strayOut) })
       child.stderr.on('end', () => { flushStray(strayErr) })
 
@@ -1803,11 +1773,6 @@ export class PythonPtcRuntime extends PtcRuntime {
               return
             }
             if (message.error) {
-              if (confined !== undefined) {
-                const failure = message.error
-                sandbox.denied = confined.denialSignatures.some(signature =>
-                  failure.message.toLowerCase().includes(signature.toLowerCase()))
-              }
               finish({ error: { kind: message.error.kind, message: capMessage(message.error.message, this.config.maxValueBytes) } })
               return
             }
@@ -2155,7 +2120,7 @@ export class PythonPtcRuntime extends PtcRuntime {
         if (resolved) return
         resolved = true
         if (closeDeadline !== undefined) clearTimeout(closeDeadline)
-        resolve({ ...result, logs, sandbox: { ...sandbox } })
+        resolve({ ...result, logs })
         // Mark the fiber quiescent for THIS run: drop it from `live` and resolve
         // `finished` (what teardown awaits). Deferred until the process group is
         // actually empty — dropping from `live` before then would let a
@@ -2289,9 +2254,8 @@ export class PythonPtcRuntime extends PtcRuntime {
       }
 
       child.on('error', (error: Error) => {
-        finish({ error: { kind: confined !== undefined && isRunnerSpawnFailure(error, argv[0], request.cwd) ? 'sandbox-unavailable' : 'worker-exit', message: `python spawn error: ${error.message}` } })
+        finish({ error: { kind: 'worker-exit', message: `python spawn error: ${error.message}` } })
       })
-      let bootstrapWriteFailed = false
       // `close` (not `exit`) is the settlement trigger: it fires only after the
       // process exits AND every stdio stream — including the fd-3 protocol pipe —
       // has drained, so a `done` frame the child wrote just before exiting is
@@ -2302,16 +2266,9 @@ export class PythonPtcRuntime extends PtcRuntime {
         // frame, only SIGXCPU identifies CPU expiry: launchers can remap signals
         // to exit codes that programs can also choose deliberately.
         // The configured ceiling may exceed the inherited effective RLIMIT_CPU.
-        const runnerFailure = confined === undefined ? undefined : classifyRunnerFailure(code, runnerStderr.toString('utf8'), confined.runnerFailureRules)
-        // A launcher refusal can close stdin before its fatal stderr reaches the host.
-        if (bootstrapWriteFailed && runnerFailure !== undefined) {
-          decided = { error: { kind: 'sandbox-unavailable', message: runnerFailure.detail } }
-        }
-        finish(runnerFailure !== undefined
-          ? { error: { kind: 'sandbox-unavailable', message: runnerFailure.detail } }
-          : signal === 'SIGXCPU'
-            ? { error: { kind: 'timeout', message: `CPU time exhausted (limit at most the configured ${this.config.cpuSeconds}s; a stricter inherited RLIMIT_CPU can fire sooner)` } }
-            : { error: { kind: 'worker-exit', message: `python exited (code=${String(code)}, signal=${String(signal)}) before completing` } })
+        finish(signal === 'SIGXCPU'
+          ? { error: { kind: 'timeout', message: `CPU time exhausted (limit at most the configured ${this.config.cpuSeconds}s; a stricter inherited RLIMIT_CPU can fire sooner)` } }
+          : { error: { kind: 'worker-exit', message: `python exited (code=${String(code)}, signal=${String(signal)}) before completing` } })
         settle(decided)
       })
 
@@ -2329,7 +2286,6 @@ export class PythonPtcRuntime extends PtcRuntime {
       request.signal.addEventListener('abort', onAbort, { once: true })
       const failBootstrapWrite = (error: unknown): void => {
         if (settled) return
-        bootstrapWriteFailed = true
         finish({ error: { kind: 'worker-exit', message: `failed to load python bootstrap: ${messageOf(error)}` } })
       }
       child.stdin.on('error', failBootstrapWrite)

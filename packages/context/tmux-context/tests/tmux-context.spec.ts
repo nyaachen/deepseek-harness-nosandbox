@@ -67,7 +67,6 @@ class FakeBash extends ShellExecutor {
       onExpiry: request.onExpiry ?? 'kill',
       stdoutMaxBytes: request.stdoutMaxBytes ?? 64_000,
       signal: request.signal,
-      sandboxPolicy: request.sandboxPolicy,
     }
   }
   override async execute(spec: ShellExecSpec): Promise<ShellExecution> {

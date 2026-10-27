@@ -1,14 +1,10 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
-import { setSandboxMode } from '@deepseek-ai/dsh-sandbox-policy'
 import { Duplex, PassThrough } from 'node:stream'
 import { setImmediate } from 'node:timers/promises'
-import { SessionId } from '@deepseek-ai/dsh-session'
 import { Context } from '@deepseek-ai/cordis'
 import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import type { PtcBindingFunction, PtcRunRequest } from '@deepseek-ai/dsh-ptc-runtime'
 import type { SubprocessHandle, SubprocessOutcome } from '@deepseek-ai/dsh-subprocess'
-import { SandboxUnavailableError } from '@deepseek-ai/dsh-sandbox'
-import type { ConfinedArgv } from '@deepseek-ai/dsh-sandbox'
 import { MAX_TIMER_DELAY_MS } from '@deepseek-ai/dsh-timeout'
 import type { Config } from '../src/index.ts'
 import { JsonChannel } from '../src/channel.ts'
@@ -18,9 +14,9 @@ import { mountRuntime } from './setup.ts'
 const request: PtcRunRequest = { program: 'return 1', bindings: [] }
 const NO_INITIAL_FRAME = Symbol('no initial frame')
 
-async function setup(config: Config = {}, mode: 'read-only' | 'danger-full-access' = 'danger-full-access') {
+async function setup(config: Config = {}) {
   const ctx = new Context()
-  const { runtime } = await mountRuntime(ctx, config, { mode, workspaceRoot: process.cwd() })
+  const { runtime } = await mountRuntime(ctx, config)
   const control = new Duplex({
     read() {},
     write(chunk: Buffer, _encoding, callback) {
@@ -102,10 +98,6 @@ function withBinding(fn: PtcBindingFunction): PtcRunRequest {
   return { ...request, bindings: [{ global: 'tools', functions: { test: fn } }] }
 }
 
-function confinement(argv: string[]): ConfinedArgv {
-  return { argv, enforcement: 'partial', denialSignatures: ['EACCES'], runnerFailureRules: [{ fatalSignatures: ['sandbox-fatal:'] }] }
-}
-
 describe('Node runtime host failures', () => {
   it.each<[Config, string]>([
     [{ timeoutMs: 0 }, 'timeoutMs'],
@@ -126,52 +118,15 @@ describe('Node runtime host failures', () => {
     await expect(mountRuntime(new Context(), config)).rejects.toThrow(field)
   })
 
-  it('reports the deployment mode and rejects unsupported resolved inputs before spawning', async () => {
-    const h = await setup({}, 'read-only')
-    expect(h.runtime.sandboxMode).toBe('read-only')
+  it('rejects unsupported resolved inputs before spawning', async () => {
+    const h = await setup()
     expect(() => h.runtime.resolve({ ...request, cwd: 'relative' })).toThrow('cwd must be absolute')
-    await expect(h.runtime.run({ ...request, cwd: process.cwd(), timeoutMs: 1 })).rejects.toThrow('resolved sandbox policy')
     const spec = h.runtime.resolve(request)
     await expect(h.runtime.run({ ...spec, timeoutMs: Infinity })).rejects.toThrow('resolved cwd and timeout')
     expect(h.spawn).not.toHaveBeenCalled()
     await h.ctx.fiber.dispose()
     expect(() => h.runtime.resolve(request)).toThrow('resolve after disposal')
     await expect(h.runtime.run(spec)).rejects.toThrow('run after disposal')
-  })
-
-  it('fails a required unavailable sandbox before spawning', async () => {
-    const h = await setup({}, 'read-only')
-    vi.spyOn(h.ctx.sandbox, 'confine').mockRejectedValue(new SandboxUnavailableError('read-only'))
-    expect((await h.start()).error?.kind).toBe('sandbox-unavailable')
-    expect(h.spawn).not.toHaveBeenCalled()
-  })
-
-  it('keeps partial enforcement separate from a successful program', async () => {
-    const h = await setup({}, 'read-only')
-    vi.spyOn(h.ctx.sandbox, 'confine').mockImplementation(async argv => confinement([...argv]))
-    h.onBoot(() => { h.emit({ type: 'done', value: encodePtcJsonWire(42) }) })
-    expect(await h.start()).toEqual({ logs: [], value: 42, sandbox: { mode: 'read-only', denied: false, enforcement: 'partial' } })
-  })
-
-  it.each([['EACCES: blocked', true], ['EPERM: unrelated dialect', false]] as const)('uses only the selected denial dialect for %s', async (message, denied) => {
-    const h = await setup({}, 'read-only')
-    vi.spyOn(h.ctx.sandbox, 'confine').mockImplementation(async argv => confinement([...argv]))
-    h.onBoot(() => { h.emit({ type: 'done', error: { kind: 'exception', message } }) })
-    const result = await h.start()
-    expect(result.error).toEqual({ kind: 'exception', message })
-    expect(result.sandbox).toEqual({ mode: 'read-only', denied, enforcement: 'partial' })
-  })
-
-  it('distinguishes fatal sandbox startup output from a program denial', async () => {
-    const h = await setup({}, 'read-only')
-    vi.spyOn(h.ctx.sandbox, 'confine').mockImplementation(async argv => confinement([...argv]))
-    h.onBoot(() => {
-      h.stderr.write('sandbox-fatal: runner could not initialize')
-      h.direct.resolve({ exitCode: 1, signal: null })
-    })
-    const result = await h.start()
-    expect(result.error?.kind).toBe('sandbox-unavailable')
-    expect(result.sandbox?.denied).toBe(false)
   })
 
   it('reports bootstrap assets that cannot map into the execution world', async () => {
@@ -238,30 +193,6 @@ describe('Node runtime host failures', () => {
     })
     expect((await h.start({ ...request, signal: controller.signal }, NO_INITIAL_FRAME)).error?.kind).toBe('abort')
     expect(h.spawn).not.toHaveBeenCalled()
-  })
-
-  it('does not launch when confinement resolves after cancellation', async () => {
-    const h = await setup({}, 'read-only')
-    const entered = Promise.withResolvers<AbortSignal>()
-    const response = Promise.withResolvers<ConfinedArgv>()
-    vi.spyOn(h.ctx.sandbox, 'confine').mockImplementation((_argv, _policy, signal) => {
-      entered.resolve(signal!)
-      return response.promise
-    })
-    const controller = new AbortController()
-    const pending = h.start({ ...request, signal: controller.signal }, NO_INITIAL_FRAME)
-    try {
-      const signal = await entered.promise
-      expect(signal.aborted).toBe(false)
-      controller.abort('confinement cancelled')
-      expect(signal.aborted).toBe(true)
-      response.resolve(confinement([process.execPath]))
-      expect((await pending).error).toEqual({ kind: 'abort', message: 'confinement cancelled' })
-      expect(h.spawn).not.toHaveBeenCalled()
-    } finally {
-      response.resolve(confinement([process.execPath]))
-      await pending
-    }
   })
 
   it('reports an early control EOF using the direct process result', async () => {
@@ -472,17 +403,7 @@ describe('Node runtime host failures', () => {
     expect((await h.start()).error).toEqual({ kind: 'worker-exit', message: 'Node process exited before completing (9): native fatal detail' })
   })
 
-  it.each([true, false])('attributes a failed confined spawn only with runner evidence (%s)', async (runnerFailed) => {
-    const h = await setup({}, 'read-only')
-    const runner = '/sandbox-runner'
-    vi.spyOn(h.ctx.sandbox, 'confine').mockImplementation(async argv => confinement([runner, ...argv]))
-    h.onBoot(() => {
-      h.direct.reject(Object.assign(new Error('spawn rejected'), runnerFailed ? { code: 'ENOENT', path: runner, syscall: `spawn ${runner}` } : {}))
-    })
-    expect((await h.start()).error).toEqual({ kind: runnerFailed ? 'sandbox-unavailable' : 'worker-exit', message: 'spawn rejected' })
-  })
-
-  it('retains distinct native temp paths for the trusted launcher while removing other ambient values', async () => {
+  it('clears inherited ambient values while keeping native startup paths in the spawned environment', async () => {
     const h = await setup()
     onTestFinished(() => { vi.unstubAllEnvs() })
     vi.stubEnv('TEMP', 'fixture-temp-first')
@@ -512,33 +433,15 @@ describe('Node runtime host failures', () => {
   })
 })
 
-it('keeps failed per-call cleanup registered until process observation succeeds', async () => {
+it('reports a throwing spawn as a substrate failure', async () => {
   const h = await setup()
-  const session = h.ctx.sessions.create(SessionId('per-call-cleanup-retry'))
-  h.waitForExit.mockRejectedValue(new Error('range cannot be observed'))
-  h.onBoot(() => { h.emit({ type: 'done', value: encodePtcJsonWire(42) }) })
-  const result = await h.start({ ...request, sandboxPolicy: h.ctx.sandboxPolicy.resolve({ session }) })
-  expect(result.error?.kind).toBe('worker-exit')
-  setSandboxMode(session, 'read-only')
-  expect(h.ctx.sandboxPolicy.resolve({ session }).mode).toBe('read-only')
-  await expect(h.runtime.run(h.runtime.resolve({ ...request, sandboxPolicy: h.ctx.sandboxPolicy.resolve({ session }) }))).rejects.toThrow('range cannot be observed')
-  h.waitForExit.mockResolvedValue(true)
-  await h.ctx.fiber.dispose()
-  expect(h.waitForExit.mock.calls.length).toBeGreaterThanOrEqual(3)
-})
-
-it('unregisters a Session resource when process spawn fails', async () => {
-  const h = await setup()
-  const session = h.ctx.sessions.create(SessionId('failed-session-spawn'))
   h.spawn.mockImplementation(() => { throw new Error('spawn failed') })
-  const result = await h.start({ ...request, sandboxPolicy: h.ctx.sandboxPolicy.resolve({ session }) }, NO_INITIAL_FRAME)
-  expect(result.error?.message).toContain('spawn failed')
-  setSandboxMode(session, 'read-only')
+  const result = await h.start(request, NO_INITIAL_FRAME)
+  expect(result.error).toEqual({ kind: 'worker-exit', message: 'spawn failed' })
 })
 
 it('preserves execution context for bindings delivered by an external control stream', async () => {
   const h = await setup()
-  const session = h.ctx.sessions.create(SessionId('external-binding-context'))
   const booted = Promise.withResolvers<undefined>()
   h.receive((raw) => {
     const message = raw as { type: string; ok?: boolean; value?: unknown }
@@ -546,12 +449,12 @@ it('preserves execution context for bindings delivered by an external control st
     if (message.type === 'reply') h.emit({ type: 'done', value: message.value })
   })
   const context = new AsyncLocalStorage<string>()
-  const pending = context.run('binding context', () => h.start({ ...request, sandboxPolicy: h.ctx.sandboxPolicy.resolve({ session }),
+  const pending = context.run('binding context', () => h.start({
+    ...request,
     bindings: [{ global: 'tools', functions: { test: async () => context.getStore() ?? null } }],
   }))
   await booted.promise
   h.emit(call(1))
   const result = await pending
   expect(result.value).toBe('binding context')
-  expect(h.ctx.sandboxPolicy.resolve({ session }).mode).toBe('danger-full-access')
 })

@@ -90,7 +90,7 @@ type MaterializeInputs = MaterializeBase & (
       meta: NonNullable<CreateAgentOptions['meta']>
       /** Exact parent-log prefix length inside {@link seed}. */
       inheritedEventCount: SessionLogOffset
-      /** Policy captured at delegation: the parent's sandbox override plus the approval pin. */
+      /** Policy captured at delegation: the inherited preset identity plus the approval pin. */
       delegatedPolicies: DelegatedPolicyOverrides
       /** Child-owned composition record appended after the inherited marker. */
       descriptor: SubagentDescriptorData

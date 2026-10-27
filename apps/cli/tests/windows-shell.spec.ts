@@ -40,7 +40,7 @@ describe('the shipped shell composition (real bundle layers)', () => {
   // suite composes the shipped patch files, not test fixtures.
   const anchor = fileURLToPath(new URL('../package.json', import.meta.url))
 
-  it('composes the confined pwsh roster on win32 and the bash roster on POSIX from the same rows', () => {
+  it('composes the pwsh roster on win32 and the bash roster on POSIX from the same rows', () => {
     home = mkdtempSync(join(tmpdir(), 'dsh-windows-home-'))
     initProfile(join(home, PROFILES_DIR, 'web'), ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app'])
     const profile = loadProfile('dsh', 'web', anchor, home)
@@ -51,28 +51,27 @@ describe('the shipped shell composition (real bundle layers)', () => {
     )
     const byId = new Map(rows.map(row => [row.id, row]))
     // One shared patch set, two rosters: the shell stacks gate themselves.
-    for (const id of ['bash-sandbox', 'pwsh-sandbox', 'tool-bash', 'tool-pwsh']) {
+    for (const id of ['bash-local', 'pwsh-local', 'tool-bash', 'tool-pwsh']) {
       expect(byId.has(id), `row ${id}`).toBe(true)
     }
-    expect(disabledOn(byId.get('bash-sandbox')!, 'win32'), 'bash-sandbox on win32').toBe(true)
-    expect(disabledOn(byId.get('bash-sandbox')!, 'linux'), 'bash-sandbox on linux').toBe(false)
-    expect(disabledOn(byId.get('pwsh-sandbox')!, 'win32'), 'pwsh-sandbox on win32').toBe(false)
-    expect(disabledOn(byId.get('pwsh-sandbox')!, 'linux'), 'pwsh-sandbox on linux').toBe(true)
+    expect(disabledOn(byId.get('bash-local')!, 'win32'), 'bash-local on win32').toBe(true)
+    expect(disabledOn(byId.get('bash-local')!, 'linux'), 'bash-local on linux').toBe(false)
+    expect(disabledOn(byId.get('pwsh-local')!, 'win32'), 'pwsh-local on win32').toBe(false)
+    expect(disabledOn(byId.get('pwsh-local')!, 'linux'), 'pwsh-local on linux').toBe(true)
     // Host shell-tool rows are disabled on every platform; sessions mount
     // their own rows instead.
     expect(byId.get('tool-bash')?.disabled).toBe(true)
     expect(byId.get('tool-pwsh')?.disabled).toBe(true)
-    // The permission surface never moves: the sandbox/policy rows, the
-    // permission switcher, fs-sandbox, and the approval service stay enabled
-    // exactly as on POSIX — the confined pwsh executor is what changes.
-    for (const id of ['permission', 'ui-permission', 'sandbox', 'sandbox-policy', 'fs-sandbox', 'approval']) {
+    // The file and approval rows stay enabled exactly as on POSIX — the
+    // executor platform, not the permission surface, is what changes.
+    for (const id of ['fs-local', 'approval']) {
       expect(byId.get(id)?.disabled, `row ${id}`).not.toBe(true)
     }
     // The launcher's cold-start module fallback BFS-links the apps/cli
     // dependency closure into the profile's node_modules, so every bare
     // plugin name in the base patch must resolve from there.
     const cliManifest = JSON.parse(readFileSync(anchor, 'utf8')) as { dependencies?: Record<string, string> }
-    for (const name of ['@deepseek-ai/dsh-pwsh-sandbox', '@deepseek-ai/dsh-tool-pwsh']) {
+    for (const name of ['@deepseek-ai/dsh-pwsh-local', '@deepseek-ai/dsh-tool-pwsh']) {
       expect(cliManifest.dependencies?.[name], `cold-start closure must reach ${name}`).toBeDefined()
     }
     expect(warnings).toEqual([])
@@ -88,7 +87,7 @@ describe('the shipped shell composition (real bundle layers)', () => {
       message => warnings.push(message),
     )
     const byId = new Map(rows.map(row => [row.id, row]))
-    for (const id of ['bash-sandbox', 'tool-bash', 'pwsh-sandbox', 'tool-pwsh']) {
+    for (const id of ['bash-local', 'tool-bash', 'pwsh-local', 'tool-pwsh']) {
       expect(byId.has(id), `row ${id}`).toBe(true)
     }
     // No web overlay: the tool rows keep their own gating too.

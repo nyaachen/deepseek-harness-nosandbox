@@ -1,11 +1,9 @@
-import { setSandboxMode } from '@deepseek-ai/dsh-sandbox-policy'
 /** Agent controls use the same manager methods as the Web and bound inventory reads. */
 import { Context } from '@deepseek-ai/cordis'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import { ToolCallId } from '@deepseek-ai/dsh-llm'
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import SandboxPolicy from '@deepseek-ai/dsh-sandbox-policy'
 import { Session, SessionId, SESSION_FORMAT_VERSION } from '@deepseek-ai/dsh-session'
 import SessionProjections from '@deepseek-ai/dsh-session-projection'
 import ApprovalService, { type ApprovalOutcome } from '@deepseek-ai/dsh-user-approval'
@@ -19,7 +17,14 @@ function resultText(result: Awaited<ReturnType<ToolRuntime['execute']>>): string
   return result.value
 }
 
-async function fixture(mode: 'read-only' | 'workspace-write' | 'danger-full-access' = 'danger-full-access', approval?: 'ask' | 'never') {
+type FixtureApproval = 'auto' | 'ask' | 'never' | 'none'
+
+/**
+ * Compose the tool over a stub manager. `'auto'` mounts an asking approval service with a
+ * standing grant, `'ask'` mounts the service alone so a test owns the answerer, `'never'`
+ * mounts the deterministic policy, and `'none'` omits the service.
+ */
+async function fixture(approval: FixtureApproval = 'auto') {
   const ctx = new Context()
   onTestFinished(() => ctx.fiber.dispose())
   const manager = {
@@ -36,23 +41,31 @@ async function fixture(mode: 'read-only' | 'workspace-write' | 'danger-full-acce
   await ctx.plugin(SystemPrompt)
   await ctx.plugin(ToolRuntime)
   await ctx.plugin(SessionProjections)
-  await ctx.plugin(SandboxPolicy, { mode })
-  if (approval !== undefined) await ctx.plugin(ApprovalService, { policy: approval })
+  if (approval !== 'none') await ctx.plugin(ApprovalService, { policy: approval === 'never' ? 'never' : 'ask' })
+  if (approval === 'auto') ctx.on('approval/request', async () => 'allowed-once' as const)
   const fiber = await ctx.plugin(tool)
-  const call = (args: unknown, agent?: Agent, signal = new AbortController().signal) => ctx.tools.execute({ name: 'plugin_manager', arguments: args,
+  const call = (args: unknown, agent: Agent | undefined = activeAgent(), signal = new AbortController().signal) => ctx.tools.execute({ name: 'plugin_manager', arguments: args,
     ...agent === undefined ? {} : { agent },
     callId: ToolCallId('manager-call'), signal })
   return { ctx, manager, call, fiber }
 }
 
-it.each(['read-only', 'workspace-write'] as const)('denies every management action in %s before accessing the manager', async (mode) => {
-  const { call, manager } = await fixture(mode)
+it('denies every management action when no approval service is composed', async () => {
+  const { call, manager } = await fixture('none')
   for (const action of ['list_plugins', 'list_bundles', 'set_plugin', 'set_bundle', 'install_bundle', 'remove_bundle', 'list_version_exemptions', 'set_version_exemption']) {
     const result = await call({ action, target: 'bundle', enabled: true })
     expect(result.isError).toBe(true)
     expect(JSON.stringify(result.content)).toContain('requires approval, but no approval service is composed')
   }
   for (const method of Object.values(manager)) expect(method).not.toHaveBeenCalled()
+})
+
+it('denies a call that has no agent to route the approval through', async () => {
+  const { call, manager } = await fixture()
+  const result = await call({ action: 'list_plugins' }, undefined)
+  expect(result.isError).toBe(true)
+  expect(JSON.stringify(result.content)).toContain('requires approval, but the call has no agent to route it through')
+  expect(manager.listPlugins).not.toHaveBeenCalled()
 })
 
 it('preserves selected bundle load errors in the agent list result', async () => {
@@ -116,19 +129,20 @@ it('exposes an absent Official bundle installation target without display metada
   `)
 })
 
-it('checks the calling session on each execution, including after permission is revoked', async () => {
-  const { call, manager } = await fixture()
-  const id = SessionId('manager-permissions')
-  const session = Session.create(id, undefined, { version: SESSION_FORMAT_VERSION, id, createdAt: 0, isSeeded: false })
-  const agent = { session } as unknown as Agent
-  setSandboxMode(session, 'workspace-write')
-  expect((await call({ action: 'list_plugins' }, agent)).isError).toBe(true)
-  expect(manager.listPlugins).not.toHaveBeenCalled()
-  setSandboxMode(session, 'danger-full-access')
+it('asks again on every execution, including after the answerer is removed', async () => {
+  const { ctx, call, manager } = await fixture('ask')
+  const agent = activeAgent()
+  const prompted = vi.fn(async () => 'allowed-once' as const)
+  const dispose = ctx.on('approval/request', prompted)
   expect((await call({ action: 'list_plugins' }, agent)).isError).toBe(false)
-  setSandboxMode(session, 'read-only')
-  expect((await call({ action: 'list_plugins' }, agent)).isError).toBe(true)
-  expect(manager.listPlugins).toHaveBeenCalledTimes(1)
+  expect((await call({ action: 'list_plugins' }, agent)).isError).toBe(false)
+  expect(prompted).toHaveBeenCalledTimes(2)
+  expect(manager.listPlugins).toHaveBeenCalledTimes(2)
+  dispose()
+  const denied = await call({ action: 'list_plugins' }, agent)
+  expect(denied.isError).toBe(true)
+  expect(JSON.stringify(denied.content)).toContain('no approval channel is available')
+  expect(manager.listPlugins).toHaveBeenCalledTimes(2)
 })
 
 function activeAgent(): Agent {
@@ -138,8 +152,8 @@ function activeAgent(): Agent {
   return { session } as unknown as Agent
 }
 
-it.each(['read-only', 'workspace-write'] as const)('approves each action once in %s without changing session permissions', async (mode) => {
-  const { ctx, call, manager } = await fixture(mode, 'ask')
+it('approves each action once', async () => {
+  const { ctx, call, manager } = await fixture('ask')
   const agent = activeAgent()
   const prompted = vi.fn(async () => 'allowed-once' as const)
   const dispose = ctx.on('approval/request', prompted)
@@ -148,7 +162,6 @@ it.each(['read-only', 'workspace-write'] as const)('approves each action once in
   }
   expect(prompted).toHaveBeenCalledTimes(8)
   for (const method of Object.values(manager)) expect(method).toHaveBeenCalledTimes(1)
-  expect(ctx.sandboxPolicy.resolve({ session: agent.session }).mode).toBe(mode)
   const audit = agent.session.snapshotEvents().filter(event => event.type.startsWith('approval/'))
   expect(audit).toHaveLength(16)
   expect(audit[0]).toMatchObject({ type: 'approval/asked', data: {
@@ -164,7 +177,7 @@ it.each(['read-only', 'workspace-write'] as const)('approves each action once in
 })
 
 it.each(['rejected', 'cancelled', 'unavailable'] as const)('does not mutate the profile when approval is %s', async (outcome) => {
-  const { ctx, call, manager } = await fixture('workspace-write', 'ask')
+  const { ctx, call, manager } = await fixture('ask')
   ctx.on('approval/request', async () => outcome)
   const agent = activeAgent()
   expect((await call({ action: 'install_bundle', target: 'bundle' }, agent)).isError).toBe(true)
@@ -173,21 +186,18 @@ it.each(['rejected', 'cancelled', 'unavailable'] as const)('does not mutate the 
     .map(event => event.data.outcome)).toEqual([outcome])
 })
 
-it('rejects never policy without prompting and keeps full-access calls prompt-free', async () => {
-  const { ctx, call, manager } = await fixture('workspace-write', 'never')
+it('rejects the never policy without prompting anyone', async () => {
+  const { ctx, call, manager } = await fixture('never')
   const prompted = vi.fn(async () => 'allowed-once' as const)
   ctx.on('approval/request', prompted, { prepend: true })
   const agent = activeAgent()
   expect((await call({ action: 'set_plugin', target: 'include:demo', enabled: true }, agent)).isError).toBe(true)
   expect(manager.setPluginEnabled).not.toHaveBeenCalled()
-  setSandboxMode(agent.session, 'danger-full-access')
-  expect((await call({ action: 'set_plugin', target: 'include:demo', enabled: true }, agent)).isError).toBe(false)
-  expect(manager.setPluginEnabled).toHaveBeenCalledTimes(1)
   expect(prompted).not.toHaveBeenCalled()
 })
 
 it('cancels an approval wait before any manager operation', async () => {
-  const { ctx, call, manager } = await fixture('workspace-write', 'ask')
+  const { ctx, call, manager } = await fixture('ask')
   const asked = Promise.withResolvers<undefined>()
   const answer = Promise.withResolvers<ApprovalOutcome>()
   ctx.on('approval/request', () => { asked.resolve(undefined); return answer.promise })
@@ -202,7 +212,7 @@ it('cancels an approval wait before any manager operation', async () => {
 })
 
 it('does not apply a grant when the call was cancelled before dispatch', async () => {
-  const { ctx, call, manager } = await fixture('workspace-write', 'ask')
+  const { ctx, call, manager } = await fixture('ask')
   const controller = new AbortController()
   vi.spyOn(ctx.approval, 'request').mockImplementation(async () => {
     controller.abort()

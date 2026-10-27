@@ -1,4 +1,3 @@
-import { setSandboxMode } from '@deepseek-ai/dsh-sandbox-policy'
 import { provideWorkingDirectoryFixture } from '@deepseek-ai/dsh-agent-loop-testkit'
 import { Context } from '@deepseek-ai/cordis'
 import AgentRegistry from '@deepseek-ai/dsh-agent'
@@ -6,7 +5,6 @@ import { PtcRuntime } from '@deepseek-ai/dsh-ptc-runtime'
 import type { PtcBindingFunction, PtcRunRequest, PtcRunResult, PtcRunSpec } from '@deepseek-ai/dsh-ptc-runtime'
 import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
 import SessionProjections from '@deepseek-ai/dsh-session-projection'
-import SandboxPolicy from '@deepseek-ai/dsh-sandbox-policy'
 import SubagentRuntime from '@deepseek-ai/dsh-subagent'
 import type { SubagentActivation, SubagentResult } from '@deepseek-ai/dsh-subagent'
 import { describe, expect, it, onTestFinished, vi } from 'vitest'
@@ -19,8 +17,6 @@ type HostBindings = Record<string, PtcBindingFunction>
 class ControlledRuntime extends PtcRuntime {
   language = 'typescript'
   readonly isolation = 'process'
-  policyMode: 'read-only' | undefined = 'read-only'
-  override get sandboxMode(): 'read-only' | undefined { return this.policyMode }
   execute: (spec: PtcRunSpec) => Promise<PtcRunResult> = () => Promise.resolve(completed)
 
   resolve(request: PtcRunRequest): PtcRunSpec {
@@ -36,7 +32,6 @@ async function setup(execute?: (bindings: HostBindings, spec: PtcRunSpec) => Pro
   await ctx.plugin(SessionStore)
   await ctx.plugin(AgentRegistry)
   await ctx.plugin(SessionProjections)
-  await ctx.plugin(SandboxPolicy, { mode: 'read-only' })
   provideWorkingDirectoryFixture(ctx)
   await ctx.plugin(SubagentRuntime)
   ctx.subagents.registerProvider({
@@ -62,22 +57,16 @@ async function setup(execute?: (bindings: HostBindings, spec: PtcRunSpec) => Pro
 }
 
 describe('workflow host callback validation', () => {
-  it('runs an unconfined provider under full access without forwarding a sandbox policy', async () => {
-    const { runtime, parent, start } = await setup(async (_bindings, spec) => {
-      expect(spec.sandboxPolicy).toBeUndefined()
-      return completed
-    })
-    runtime.policyMode = undefined
-    setSandboxMode(parent.session, 'danger-full-access')
+  it('runs a provider whose spec carries no execution policy', async () => {
+    const { start } = await setup(async () => completed)
     const handle = start()
     try {
       expect(await handle.result).toEqual({ value: null, stopReason: 'completed', agentsStarted: 0 })
     } finally { await handle.dispose() }
   })
 
-  it('settles a failed directory lookup when the runtime cannot confine execution', async () => {
+  it('settles a failed directory lookup before starting the program', async () => {
     const { ctx, runtime, start } = await setup()
-    runtime.policyMode = undefined
     const ensureDirectory = vi.spyOn(ctx.workingDirectory, 'ensure').mockRejectedValue(new Error('selected directory is unavailable'))
     const execute = vi.spyOn(runtime, 'run')
     const run = start()
@@ -97,7 +86,7 @@ describe('workflow host callback validation', () => {
     const entered = Promise.withResolvers<undefined>()
     const release = Promise.withResolvers<undefined>()
     let launched: PtcRunSpec | undefined
-    const { ctx, start, parent } = await setup(async (bindings, spec) => {
+    const { ctx, start } = await setup(async (bindings, spec) => {
       launched = spec
       entered.resolve(undefined)
       await release.promise
@@ -114,7 +103,6 @@ describe('workflow host callback validation', () => {
       release.resolve(undefined)
       expect((await run.result).stopReason).toBe('completed')
       expect(launched?.cwd).toBe(initial)
-      expect(launched?.sandboxPolicy?.workspaceRoot).toBe(parent.session.header.cwd)
       expect(childStart).toHaveBeenCalledOnce()
       const selected = childStart.mock.calls[0]![0]
       expect(selected.provider).toBe('stub')
@@ -165,20 +153,17 @@ describe('workflow host callback validation', () => {
     } finally { await handle.dispose() }
   })
 
-  it.each([true, false])('carries Session cwd and an unlimited deadline with confinement capability %s', async (confined) => {
-    const { ctx, runtime, parent, start } = await setup(async (bindings, spec) => {
+  it('carries the Session cwd and an unlimited deadline', async () => {
+    const { parent, start } = await setup(async (bindings, spec) => {
       expect(spec.timeoutMs).toBeNull()
       expect(spec.cwd).toBe(parent.session.header.cwd)
-      expect(spec.sandboxPolicy).toEqual(confined ? ctx.sandboxPolicy.resolve({ session: parent.session }) : undefined)
       expect(await bindings.begin!({})).toMatchObject({ body: 'return null', meta: { name: 'host-test' } })
       return completed
     })
-    runtime.policyMode = confined ? 'read-only' : undefined
     const handle = start()
     try {
       const result = await handle.result
-      expect(result.stopReason, result.error).toBe(confined ? 'completed' : 'error')
-      if (!confined) expect(result.error).toContain('cannot enforce the read-only file policy')
+      expect(result.stopReason, result.error).toBe('completed')
     } finally { await handle.dispose() }
   })
 })

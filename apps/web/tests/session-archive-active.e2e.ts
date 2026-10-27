@@ -38,8 +38,8 @@ const WAIT_COMMAND = `node -e "const fs=require('node:fs'); fs.writeFileSync('st
 /**
  * First stream: one Bash call whose child announces itself, then beats on a
  * file until it finishes; second stream: the continuation answer. The
- * heartbeat file is the liveness evidence: a pid is not comparable across the
- * Linux sandbox's PID namespace, a growing file is.
+ * heartbeat file is the liveness evidence: a growing file survives any PID
+ * indirection between the shell and this process.
  */
 function script(): ReplayEntry[] {
   const args = JSON.stringify({ command: WAIT_COMMAND, description: 'Wait a long time' })

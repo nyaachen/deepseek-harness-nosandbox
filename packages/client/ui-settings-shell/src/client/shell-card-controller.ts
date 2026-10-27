@@ -7,9 +7,9 @@ import {
 } from '@deepseek-ai/dsh-client-ui-primitives'
 
 /** Profile entry id of the POSIX shell executor; the base bundle composes it off Windows. */
-export const BASH_NS = 'bash-sandbox'
+export const BASH_NS = 'bash-local'
 /** Profile entry id of the PowerShell executor; the base bundle composes it on Windows. */
-export const PWSH_NS = 'pwsh-sandbox'
+export const PWSH_NS = 'pwsh-local'
 
 /** The shell fields this page edits — a subset of the served schema by design. */
 export interface ShellSettings {

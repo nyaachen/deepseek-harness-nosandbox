@@ -25,11 +25,11 @@ kind: "package-reference"
 <a id="use-this-package"></a>
 ## 使用本包
 
-将本提供方与 [`dsh-ssh`](../ssh/README.zh.md) 及 `sandboxPolicy` 一同挂载，并使用配套 SSH 子进程与沙箱提供方执行程序。本提供方没有配置字段：连接身份和默认工作区属于 `dsh-ssh`，文件效果模式属于 `sandboxPolicy`。
+将本提供方与 [`dsh-ssh`](../ssh/README.zh.md) 一同挂载；配套的 SSH 子进程提供方负责执行程序。本提供方没有配置字段：连接身份和默认工作区属于 `dsh-ssh`。
 
 `resolve()` 在远端主机上规范化路径。`processPath()` 与 `fileUrl()` 在同一个远端命名空间中标识文件，并不授予主机侧访问能力。文件 URL 对字面的百分号、反斜杠和换行进行编码，保留原文件名。`processPathFromHostPath()` 返回 `undefined`，因此需要已安装可执行文件或引导程序的消费方必须显式提供远端产物。
 
-读取保留共享文件系统错误码。写入和编辑将已解析的逐次调用策略发送给辅助程序，由其规范化工作区并在原子修改所在位置执行策略。传输丢失报告 I/O 失败；修改可能已经提交，不会自动重试。
+读取保留共享文件系统错误码。写入和编辑向辅助程序请求原子修改，由其先规范化目标路径。传输丢失报告 I/O 失败；修改可能已经提交，不会自动重试。
 
 -----
 
@@ -39,7 +39,7 @@ kind: "package-reference"
 <details>
 <summary>实现细节 — 点击展开</summary>
 
-辅助程序复用 [`fs-local`](../../fs/fs-local/README.zh.md) 与 [`fs-sandbox`](../../fs/fs-sandbox/README.zh.md)，保留符号链接身份、陈旧版本拒绝、差异基线及发布语义。UTF-8 流使用有界拉取请求，在消费方提前停止时关闭远端迭代器。
+辅助程序复用 [`fs-local`](../../fs/fs-local/README.zh.md)，保留符号链接身份、陈旧版本拒绝、差异基线及发布语义。UTF-8 流使用有界拉取请求，在消费方提前停止时关闭远端迭代器。
 
 </details>
 

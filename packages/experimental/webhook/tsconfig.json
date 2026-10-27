@@ -36,9 +36,6 @@
       "path": "../../preset/agent-preset-registry"
     },
     {
-      "path": "../../interaction/permission-presets"
-    },
-    {
       "path": "../../session/session-title"
     },
     {

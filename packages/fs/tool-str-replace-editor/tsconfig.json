@@ -10,8 +10,6 @@
     { "path": "../../../vendor/schemastery" },
     { "path": "../../util/output-retention" },
     { "path": "../../core/tools" },
-    { "path": "../fs" },
-    { "path": "../../sandbox/sandbox" },
-    { "path": "../../sandbox/sandbox-policy" }
+    { "path": "../fs" }
   ]
 }

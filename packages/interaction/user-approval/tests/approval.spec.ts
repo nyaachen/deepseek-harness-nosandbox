@@ -355,7 +355,7 @@ describe('ApprovalService.request', () => {
 })
 
 describe('approval policy (the approval/policy fold)', () => {
-  const NEVER_SENTENCE = 'Approval prompts are disabled in this session: actions that require approval are rejected automatically — do not request sandbox escalation (do not set `sandbox_permissions`).'
+  const NEVER_SENTENCE = 'Approval prompts are disabled in this session: every action that requires approval is rejected automatically — do not retry a rejected operation or look for another way around it; report the limitation instead.'
   const ASK_SENTENCE = 'Approval policy: ask. Operations that require approval may ask through the configured answerers; without an available answerer, the request fails closed.'
 
   /**

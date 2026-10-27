@@ -11,7 +11,6 @@ it.each<Config>([{}, { executionMode: 'per-call' }])('starts fresh state for eac
   const stateOwner = {}
   const run = (program: string) => runtime.run(runtime.resolve({ program, bindings: [], stateOwner }))
   expect(runtime.programFormat).toBe('function-body')
-  expect(runtime.sandboxMode).toBe('danger-full-access')
   expect((await run('globalThis.retained = 17; return retained;')).value).toBe(17)
   expect((await run('return typeof retained;')).value).toBe('undefined')
   await runtime.release(stateOwner)
@@ -28,20 +27,18 @@ it('clears retained state when a provider is reloaded with another execution mod
   const first = await memory.run(memory.resolve({ program: 'let retained = 17;', bindings: [], stateOwner: owner }))
   expect(first.error).toBeUndefined()
   expect(memory.programFormat).toBe('repl')
-  expect(memory.sandboxMode).toBe('danger-full-access')
   await memoryFiber.dispose()
   const { runtime: perCall, fiber: perCallFiber } = await mountRuntime(ctx, { executionMode: 'per-call' })
   expect(perCall.programFormat).toBe('function-body')
-  expect(perCall.sandboxMode).toBe('danger-full-access')
   expect((await perCall.run(perCall.resolve({ program: 'return typeof retained;', bindings: [], stateOwner: owner }))).value).toBe('undefined')
   await perCallFiber.dispose()
   const { runtime: resumed } = await mountRuntime(ctx, { executionMode: 'persistent-in-memory' })
   expect((await resumed.run(resumed.resolve({ program: 'typeof retained', bindings: [], stateOwner: owner }))).value).toBe('undefined')
 })
 
-it.each<NonNullable<Config['executionMode']>>(['per-call', 'persistent-in-memory'])('resolves omitted cwd from the configured workspace in %s mode', async (executionMode) => {
-  const workspaceRoot = join(process.cwd(), 'configured-workspace')
-  const { runtime } = await mountRuntime(new Context(), { executionMode }, { workspaceRoot })
-  expect(runtime.resolve({ program: '', bindings: [] }).cwd).toBe(workspaceRoot)
-  expect(runtime.resolve({ program: '', bindings: [], cwd: process.cwd() }).cwd).toBe(process.cwd())
+it.each<NonNullable<Config['executionMode']>>(['per-call', 'persistent-in-memory'])('resolves an omitted cwd to the provider process directory in %s mode', async (executionMode) => {
+  const { runtime } = await mountRuntime(new Context(), { executionMode })
+  const explicit = join(process.cwd(), 'explicit-workspace')
+  expect(runtime.resolve({ program: '', bindings: [] }).cwd).toBe(process.cwd())
+  expect(runtime.resolve({ program: '', bindings: [], cwd: explicit }).cwd).toBe(explicit)
 })

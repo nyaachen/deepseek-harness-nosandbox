@@ -268,23 +268,6 @@ describe('creating and entering retained worktrees', () => {
     expect(await contents(join(root, '.agents/worktrees/retained/tracked.txt'))).toBe('initial\n')
   })
 
-  it('does not spawn Git when the sandbox refuses the standing workspace-write policy', async () => {
-    const root = await repo()
-    ctx = await harness(root, {}, 'workspace-write')
-    const agent = testAgent(ctx, root)
-    const failure = new Error('fixture sandbox refused confinement')
-    const confine = vi.spyOn(ctx.sandbox, 'confine').mockRejectedValue(failure)
-    const spawn = vi.spyOn(ctx.subprocess, 'spawn')
-
-    await expect(ctx.worktrees.create(agent, { name: 'denied-confinement' })).rejects.toBe(failure)
-
-    expect(confine).toHaveBeenCalledOnce()
-    expect(confine.mock.calls[0]?.[1]).toMatchObject({ mode: 'workspace-write', workspaceRoot: root })
-    expect(spawn).not.toHaveBeenCalled()
-    expect(ctx.workingDirectory.get(agent.session)).toBe(root)
-    expect(await readdir(root)).toEqual(['.git', 'tracked.txt'])
-  })
-
   it('does not reset the dirty source when shared Git configuration points at it', async () => {
     const root = await repo()
     await git(root, 'config', 'core.worktree', root)

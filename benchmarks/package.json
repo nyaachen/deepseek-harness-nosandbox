@@ -1,6 +1,6 @@
 {
   "name": "@deepseek-ai/dsh-benchmarks",
-  "version": "0.1.3-alpha.1",
+  "version": "0.2.1-rc.2.nosandbox",
   "license": "MIT",
   "private": true,
   "type": "module",

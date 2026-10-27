@@ -4,9 +4,7 @@
  * @module @deepseek-ai/dsh-tool-bash/render
  */
 
-import type { ShellRunResult, ShellSandboxInfo, CollectedOutput } from '@deepseek-ai/dsh-shell'
-import type { SandboxMode } from '@deepseek-ai/dsh-sandbox'
-import { escalationHintMarker, sandboxDenialMarker } from '@deepseek-ai/dsh-sandbox'
+import type { ShellRunResult, CollectedOutput } from '@deepseek-ai/dsh-shell'
 
 /** Append the truncation notice (with the full-output spill path) to a stream's text. */
 function streamText(output: CollectedOutput): string {
@@ -20,15 +18,9 @@ function streamText(output: CollectedOutput): string {
  * errored — the model decides how to react; only infrastructure failures
  * (spawn errors, aborts) surface as isError results.
  * @param result - the completed foreground run from the executor.
- * @param escalationModes - the escalation targets this composition advertises;
- *   non-empty adds the same-turn escalation hint after a denial marker
- *   (default `[]`: no hint).
  * @returns the model-facing text: output body (or `(no output)`), then any timeout/stopped/signal/exit markers, each on its own line.
  */
-export function renderResult(
-  result: ShellRunResult & { stopped?: string },
-  escalationModes: readonly SandboxMode[] = [],
-): string {
+export function renderResult(result: ShellRunResult & { stopped?: string }): string {
   const out = streamText(result.stdout)
   const err = streamText(result.stderr)
 
@@ -42,13 +34,6 @@ export function renderResult(
 
   const markers: string[] = []
   // Keep the exit marker last because parseExitStatus anchors there.
-  if (result.sandbox?.denied) {
-    markers.push(sandboxDenialMarker(result.sandbox.mode))
-    // Hint only when the composition exposes escalation, before the final exit marker.
-    if (escalationModes.length > 0) {
-      markers.push(escalationHintMarker('command'))
-    }
-  }
   // A command may trap SIGTERM and exit 0 after timeout; still report interruption.
   if (result.timedOut) markers.push(`[timed out after ${result.timeoutMs}ms]`)
   // A kill from outside the call (the human stopping its job) is not a
@@ -87,36 +72,21 @@ export function renderPromoted(promoted: { jobId: string; timeoutMs: number; out
  * Shape the one consuming registry read a foreground call embeds in its
  * result when it stops waiting: the output produced so far, plus the
  * dropped-output notice (naming the job's spill files) when the model cursor
- * fell behind the ring, and the sandbox notices. Later `job_output` reads
- * render the same ring through the job tools.
+ * fell behind the ring. Later `job_output` reads render the same ring through
+ * the job tools.
  * @param delta - the read's chunks as rendered text.
  * @param lossy - whether bytes before the delta were evicted unread.
  * @param spillPaths - the complete-stream files the job currently advertises.
- * @param sandbox - settled sandbox facts, when this was a confined process.
- * @param escalationModes - escalation targets advertised by this composition.
- * @returns the delta text with any loss or sandbox notice appended.
+ * @returns the delta text with any loss notice appended.
  */
 export function renderJobRead(
   delta: string,
   lossy: boolean,
   spillPaths: readonly string[],
-  sandbox?: ShellSandboxInfo,
-  escalationModes: readonly SandboxMode[] = [],
 ): string {
-  const notices: string[] = []
-  if (lossy) {
-    notices.push(`[some output was dropped from memory; full output: ${spillPaths.length > 0 ? spillPaths.join(', ') : '(unavailable)'}]`)
-  }
-  if (sandbox?.runnerFailed) {
-    notices.push(`[sandbox: the sandbox runner itself failed under ${sandbox.mode} mode — the command did not run; this is a sandbox problem, not a command failure]`)
-  } else if (sandbox?.denied) {
-    notices.push(sandboxDenialMarker(sandbox.mode))
-    if (escalationModes.length > 0) {
-      notices.push(escalationHintMarker('command'))
-    }
-  }
-  if (notices.length === 0) return delta
-  return `${delta}${delta.length > 0 && !delta.endsWith('\n') ? '\n' : ''}${notices.join('\n')}`
+  if (!lossy) return delta
+  const notice = `[some output was dropped from memory; full output: ${spillPaths.length > 0 ? spillPaths.join(', ') : '(unavailable)'}]`
+  return `${delta}${delta.length > 0 && !delta.endsWith('\n') ? '\n' : ''}${notice}`
 }
 
 /**

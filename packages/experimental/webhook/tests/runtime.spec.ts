@@ -223,10 +223,7 @@ describe('WebhookRuntime', () => {
     ctx.provide('agentDefaultModel', {
       currentSelection: () => ({ provider: 'p', model: 'm' }),
     } as never)
-    ctx.provide('permissionPresets', {
-      resolve: () => ({}),
-      set: () => {},
-    } as never)
+
     ctx.provide('agentPresets', {
       resolve: async (id: string) => ({ id }),
       acquireScope: async () => ({ key: {}, [Symbol.asyncDispose]: async () => {} }),
@@ -265,7 +262,6 @@ describe('WebhookRuntime', () => {
         title: 'Created',
         prompt: 'Work',
         agentPreset: 'standard',
-        permissionPreset: 'read-only',
       }),
     })
     runtime.dispatch(delivery())

@@ -3,14 +3,14 @@
 # After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write docs/subsystems/ssh.md
 /ssh:
-  en: 847a37e7a77c8a3f
-  zh: 33f4de7837ec2faa
+  en: 738608a30b3a5f3a
+  zh: d385f06bbfdd2614
 /ssh/execution-coordinates:
-  en: 6dca62a58ecbc1ff
-  zh: 1ebb7dbe79927701
+  en: 4d6239c1e1d36cc7
+  zh: ce1f078dbbb535d0
 /ssh/transport-and-trust:
-  en: e807ecd0222acb80
-  zh: b2077393b549a7fe
+  en: d348171b6e3735f5
+  zh: 154f23d84117215c
 /ssh/process-lifetime-and-cancellation:
   en: 3e29eb0f47ca4d21
   zh: 9d880e082d39577e

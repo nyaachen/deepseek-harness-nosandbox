@@ -7,7 +7,6 @@
  * @module dsh-shell/types
  */
 
-import type { SandboxEnforcement, SandboxExecutionPolicy, SandboxMode } from '@deepseek-ai/dsh-sandbox'
 import type { CollectedOutput, DshEnvironment, SubprocessOutputReader } from '@deepseek-ai/dsh-subprocess'
 
 export { DSH_ENV_PREFIX } from '@deepseek-ai/dsh-subprocess'
@@ -25,22 +24,6 @@ export interface ShellObservedStreams {
   stdout: SubprocessOutputReader
   /** Offset reader over captured stderr (the spawn-failure note after a rejected spawn). */
   stderr: SubprocessOutputReader
-}
-
-/**
- * Sandbox facts for one run, present iff a sandboxing executor handled it.
- * Facts are reported independently of process exit status so callers can
- * distinguish command failures from policy denials and runner failures.
- */
-export interface ShellSandboxInfo {
-  /** The mode the command actually ran under. */
-  mode: SandboxMode
-  /** Whether the sandbox denied a file operation. */
-  denied: boolean
-  /** How completely the selected runner enforced the requested mode. */
-  enforcement?: SandboxEnforcement
-  /** Whether the sandbox runner failed before the command could run. */
-  runnerFailed?: boolean
 }
 
 /**
@@ -99,8 +82,6 @@ export interface ShellExecRequest {
    * displace a managed one.
    */
   dshEnv?: DshEnvironment | undefined
-  /** Fully resolved per-call sandbox policy; sandboxing executors default it. */
-  sandboxPolicy?: SandboxExecutionPolicy | undefined
 }
 
 /**
@@ -132,8 +113,6 @@ export interface ShellExecSpec {
   env?: Record<string, string> | undefined
   /** Managed `DSH_*` snapshot (typed to managed keys); merges after {@link env}. */
   dshEnv?: DshEnvironment | undefined
-  /** Resolved sandbox policy; ignored by executors that do not confine. */
-  sandboxPolicy: SandboxExecutionPolicy | undefined
 }
 
 /** The outcome of a foreground run, including timeout during preparation. */
@@ -160,8 +139,6 @@ export interface ShellRunResult {
   timeoutMs: number
   stdout: CollectedOutput
   stderr: CollectedOutput
-  /** Sandbox execution facts, absent for an unsandboxed executor. */
-  sandbox?: ShellSandboxInfo
 }
 
 /** Lifecycle of a background process. */
@@ -197,8 +174,6 @@ export interface ShellProcess {
    * rejection settles as `killed` with a stage-neutral error on stderr).
    */
   readonly done: Promise<void>
-  /** Sandbox facts, stamped once a confined process settles. */
-  sandbox?: ShellSandboxInfo
   /**
    * Read output produced since the previous read (consuming — consecutive
    * reads never re-deliver). Reads that lost data flag `lossy` and point at

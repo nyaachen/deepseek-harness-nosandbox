@@ -13,7 +13,6 @@ import * as DocumentPreview from '@deepseek-ai/dsh-client-ui-sidebar-documentpre
 import type { IndexInjection } from '@deepseek-ai/dsh-host-webserver'
 import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
-import SandboxPolicyService from '@deepseek-ai/dsh-sandbox-policy'
 import LocalFileSystem from '@deepseek-ai/dsh-fs-local'
 import { FsError } from '@deepseek-ai/dsh-fs'
 import TypertRegistry from '@deepseek-ai/dsh-typert-registry'
@@ -48,7 +47,6 @@ it('loads the shipped Office rows with separately patched settings and authorize
   await writeFile(configPath, JSON.stringify([
     { name: '@deepseek-ai/dsh-session' },
     { name: '@deepseek-ai/dsh-session-projection' },
-    { name: '@deepseek-ai/dsh-sandbox-policy', config: { workspaceRoot: directory } },
     { name: '@deepseek-ai/dsh-fs-local', config: { cwd: directory } },
     { name: '@deepseek-ai/dsh-typert-registry' },
     { name: '@deepseek-ai/dsh-api-workspace-files', config: { maxFileBytes: 1 } },
@@ -73,7 +71,6 @@ it('loads the shipped Office rows with separately patched settings and authorize
   const modules = new Map<string, unknown>([
     ['@deepseek-ai/dsh-session', SessionStore],
     ['@deepseek-ai/dsh-session-projection', SessionProjectionRegistry],
-    ['@deepseek-ai/dsh-sandbox-policy', SandboxPolicyService],
     ['@deepseek-ai/dsh-fs-local', LocalFileSystem],
     ['@deepseek-ai/dsh-typert-registry', TypertRegistry],
     ['@deepseek-ai/dsh-api-workspace-files', WorkspaceFiles],
@@ -121,7 +118,7 @@ it('loads the shipped Office rows with separately patched settings and authorize
   expect(kit.create).toHaveBeenCalledWith(expect.objectContaining(kitOptions))
   await expect(ctx.officeToPdf.render(scope, 'missing.docx', 'foreground', signal))
     .rejects.toMatchObject({ code: 'workspace-file/not-found' })
-  const refusal = new FsError('read refused', 'FS_SANDBOX_DENIED')
+  const refusal = new FsError('read refused', 'FS_PERMISSION_DENIED')
   vi.spyOn(ctx.fs, 'stat').mockRejectedValueOnce(refusal)
   await expect(ctx.officeToPdf.render(scope, 'report.docx', 'foreground', signal)).rejects.toBe(refusal)
   if (process.platform !== 'win32') {

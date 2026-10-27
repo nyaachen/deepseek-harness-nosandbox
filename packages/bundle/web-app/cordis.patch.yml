@@ -415,9 +415,6 @@
     - id: ui-deepseek-model-label-1017
       name: '@deepseek-ai/dsh-client-ui-deepseek-model-label-1017'
 
-    - id: ui-permission
-      name: '@deepseek-ai/dsh-client-ui-permission-presets'
-
     # The agent-preset row in General settings: the default preset for
     # sessions created later. Absent a roster it renders nothing.
     - id: ui-agent-preset

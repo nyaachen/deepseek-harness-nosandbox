@@ -3,10 +3,8 @@ import { AsyncLocalStorage } from 'node:async_hooks'
 import { stripTypeScriptTypes } from 'node:module'
 import { isAbsolute } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
-import type { PtcRunRequest, PtcRunSpec, PtcRunResult, PtcRunSandbox, PtcRunFailure, PtcBindingNamespace, PtcJsonValue } from '@deepseek-ai/dsh-ptc-runtime'
+import type { PtcRunRequest, PtcRunSpec, PtcRunResult, PtcRunFailure, PtcBindingNamespace, PtcJsonValue } from '@deepseek-ai/dsh-ptc-runtime'
 import { clampTimeout } from '@deepseek-ai/dsh-timeout'
-import { SandboxUnavailableError, classifyRunnerFailure, isRunnerSpawnFailure } from '@deepseek-ai/dsh-sandbox'
-import type { ConfinedArgv, SandboxExecutionPolicy } from '@deepseek-ai/dsh-sandbox'
 import type { SubprocessHandle, SubprocessOutcome } from '@deepseek-ai/dsh-subprocess'
 import type { PolicyProcesses } from './policy-processes.ts'
 import type { ResolvedConfig } from './config.ts'
@@ -40,8 +38,7 @@ interface Evaluation {
 
 /** One managed process; all mutable program state belongs to this process alone. */
 class Kernel {
-  private readonly unregister: (() => void) | undefined
-  private confined: ConfinedArgv | undefined
+  private readonly unregister: () => void
   private handle?: SubprocessHandle
   private channel?: JsonChannel
   private active: Evaluation | undefined
@@ -59,10 +56,9 @@ class Kernel {
   closed = false
 
   constructor(
-    private readonly ctx: Context, private readonly config: ResolvedConfig,
-    readonly policy: SandboxExecutionPolicy, processes: PolicyProcesses,
+    private readonly ctx: Context, private readonly config: ResolvedConfig, processes: PolicyProcesses,
   ) {
-    this.unregister = processes.register(policy, () => this.dispose())
+    this.unregister = processes.register(() => this.dispose())
   }
 
   assertIdle(): void {
@@ -72,15 +68,8 @@ class Kernel {
 
   async run(spec: PtcRunSpec, bindings: Map<string, PtcBindingNamespace>, code: string): Promise<PtcRunResult> {
     this.running = true
-    const sandbox: PtcRunSandbox = { mode: this.policy.mode, denied: false }
     try {
-      const result = await this.evaluate(spec, bindings, code)
-      if (this.confined !== undefined) {
-        sandbox.enforcement = this.confined.enforcement
-        sandbox.denied = result.error?.kind !== 'sandbox-unavailable' && this.confined.denialSignatures.some(signature =>
-          result.error?.message.toLowerCase().includes(signature.toLowerCase()))
-      }
-      return { ...result, sandbox }
+      return await this.evaluate(spec, bindings, code)
     } finally { this.running = false }
   }
 
@@ -136,7 +125,7 @@ class Kernel {
     else if (this.ready) this.dispatch(evaluation)
     else {
       this.starting = this.start(spec.cwd)
-      void this.starting.catch((error: unknown) => { this.fail(error instanceof SandboxUnavailableError || (this.confined !== undefined && isRunnerSpawnFailure(error, this.confined.argv[0], spec.cwd)) ? 'sandbox-unavailable' : 'worker-exit', messageOf(error)) })
+      void this.starting.catch((error: unknown) => { this.fail('worker-exit', messageOf(error)) })
     }
     return await result.promise
   }
@@ -157,7 +146,7 @@ class Kernel {
       const handle = this.handle
       return handle === undefined || await terminateProcess(handle, this.config.graceMs)
     })().then((drained) => {
-      this.unregister?.()
+      this.unregister()
       this.cleanupPending = false
       if (!drained) this.ctx.logger.warn('persistent Node process exited but its output did not drain cleanly')
       return drained
@@ -186,14 +175,10 @@ class Kernel {
     const executable = await this.ctx.subprocess.resolveExecutable(this.config.launch.executable, undefined, this.controller.signal)
     if (this.closed) return
     const argv = [executable, `--max-old-space-size=${this.config.maxOldGenerationSizeMb}`, ...bootstrapArgs(this.ctx.fs, this.config.launch, this.config.maxMessageBytes, true)]
-    const policy = this.policy
-    this.confined = policy.mode === 'danger-full-access' ? undefined : await this.ctx.sandbox.confine(argv, { ...policy, mode: policy.mode }, this.controller.signal)
-    // oxlint-disable-next-line typescript/no-unnecessary-condition -- Cancellation can close the kernel during confinement.
-    if (this.closed) return
     const env: NodeJS.ProcessEnv = Object.fromEntries(Object.keys(process.env)
       .filter(key => !STARTUP_ENVIRONMENT_NAMES.has(key.toUpperCase()) && key.toUpperCase() !== 'ELECTRON_RUN_AS_NODE')
       .map(key => [key, undefined]))
-    const handle = this.ctx.subprocess.spawn({ argv: this.confined?.argv ?? argv, cwd, env, stdio: { stdin: 'ignore', stdout: 'pipe', stderr: 'pipe', control: 'pipe' }, graceMs: this.config.graceMs })
+    const handle = this.ctx.subprocess.spawn({ argv, cwd, env, stdio: { stdin: 'ignore', stdout: 'pipe', stderr: 'pipe', control: 'pipe' }, graceMs: this.config.graceMs })
     this.handle = handle
     if (!handle.control || !handle.stdout || !handle.stderr) throw new Error('subprocess provider did not supply persistent PTC pipes')
     for (const stream of [handle.stdout, handle.stderr]) {
@@ -214,7 +199,7 @@ class Kernel {
       await Promise.all([drainOutput(handle.stdout, this.config.graceMs), drainOutput(handle.stderr, this.config.graceMs)])
       // The terminal control frame can already be queued when process exit arrives.
       setImmediate(() => {
-        if (!this.closed) this.fail(this.confined !== undefined && classifyRunnerFailure(outcome.exitCode, this.stderr, this.confined.runnerFailureRules) !== undefined ? 'sandbox-unavailable' : 'worker-exit', this.exitMessage(outcome))
+        if (!this.closed) this.fail('worker-exit', this.exitMessage(outcome))
       })
     }, (error: unknown) => { this.fail('worker-exit', messageOf(error)) })
   }
@@ -279,14 +264,14 @@ class Kernel {
   }
 }
 
-/** Sandboxed, best-effort retained state; restart, disposal, and interrupted execution clear it. */
+/** Best-effort retained state; restart, disposal, and interrupted execution clear it. */
 export class InMemoryExecution {
   /**
    * Model-facing rules for retained variables, authority, output, and recovery.
    * @returns Usage guidance appended to the run_code schema.
    */
   get executionInstructions(): string {
-    return 'The program contains TypeScript REPL statements; only erasable syntax is accepted, with no enum or namespaces. Type annotations are advisory. Top-level declarations and await are supported; top-level return is not supported. Emit output with console.log(...) or a final lossless JSON expression. Only printed values and that final expression become program output. Variables, functions, and imported modules remain in memory for this Agent across calls. Use await import(...) for modules. Direct filesystem access follows this execution\'s sandbox policy; process.env starts empty. Changing the session sandbox mode clears retained variables. An approved sandbox escalation runs in a separate temporary environment: it cannot access retained variables, and its declarations are discarded afterward. Restart, Agent disposal, cancellation, timeout, output overflow, or process failure clears the environment. If a variable is undefined, recreate it and reacquire its resources. State is not restored from the conversation, and failed evaluations can leave earlier mutations in memory. Redeclaring an existing let, const, or class name fails; assign to a mutable binding or use a new name. Await all tool calls; background callbacks cannot call tools after their evaluation ends. Await child-process completion before ending an evaluation; raw subprocess output belongs to whichever evaluation is active when it arrives.'
+    return 'The program contains TypeScript REPL statements; only erasable syntax is accepted, with no enum or namespaces. Type annotations are advisory. Top-level declarations and await are supported; top-level return is not supported. Emit output with console.log(...) or a final lossless JSON expression. Only printed values and that final expression become program output. Variables, functions, and imported modules remain in memory for this Agent across calls. Use await import(...) for modules; process.env starts empty. Restart, Agent disposal, cancellation, timeout, output overflow, or process failure clears the environment. If a variable is undefined, recreate it and reacquire its resources. State is not restored from the conversation, and failed evaluations can leave earlier mutations in memory. Redeclaring an existing let, const, or class name fails; assign to a mutable binding or use a new name. Await all tool calls; background callbacks cannot call tools after their evaluation ends. Await child-process completion before ending an evaluation; raw subprocess output belongs to whichever evaluation is active when it arrives.'
   }
   private readonly owners = new WeakMap<object, Kernel>()
   private readonly kernels = new Set<Kernel>()
@@ -296,30 +281,24 @@ export class InMemoryExecution {
    * Own retained execution resources under the existing Node provider.
    * @param ctx - Provider lifecycle and execution services.
    * @param config - Validated limits and selected executable.
-   * @param processes - Provider-owned policy invalidation and cleanup.
+   * @param processes - Provider-owned cleanup of each retained process.
    */
   constructor(private readonly ctx: Context, private readonly config: ResolvedConfig, private readonly processes: PolicyProcesses) {
     if (this.config.launch.kind === 'embedded') throw new Error('Persistent PTC requires a node-script launch')
-    ctx.effect(() => async () => {
-      this.disposed = true
-      const results = await Promise.allSettled([...this.kernels].map(kernel => kernel.dispose()))
-      this.kernels.clear()
-      const failed = results.find(result => result.status === 'rejected')
-      if (failed?.status === 'rejected') throw failed.reason
-    }, 'Persistent PTC environments')
+    ctx.effect(() => () => { this.disposed = true }, 'Persistent PTC environments')
   }
 
   /**
-   * Resolve the file policy, directory and deadline for a retained REPL.
+   * Resolve the directory and deadline for a retained REPL.
    * @param request - Program, bindings, owner, directory and elapsed budget.
-   * @returns Resolved inputs with the selected file policy.
+   * @returns Resolved inputs for run.
    */
   resolve(request: PtcRunRequest): PtcRunSpec {
     if (this.disposed) throw new Error('persistent PTC: resolve after disposal')
-    const sandboxPolicy = request.sandboxPolicy ?? this.ctx.sandboxPolicy.resolve()
-    const cwd = request.cwd ?? sandboxPolicy.workspaceRoot
+    // The provider process directory serves a caller that supplies no directory of its own.
+    const cwd = request.cwd ?? process.cwd()
     if (!isAbsolute(cwd)) throw new Error('persistent PTC: cwd must be absolute')
-    return { ...request, sandboxPolicy, cwd, timeoutMs: request.timeoutMs === null ? null : clampTimeout(request.timeoutMs, this.config.timeoutMs, this.config.maxTimeoutMs, 'persistent PTC timeoutMs') }
+    return { ...request, cwd, timeoutMs: request.timeoutMs === null ? null : clampTimeout(request.timeoutMs, this.config.timeoutMs, this.config.maxTimeoutMs, 'persistent PTC timeoutMs') }
   }
 
   /**
@@ -329,15 +308,10 @@ export class InMemoryExecution {
    */
   async run(spec: PtcRunSpec): Promise<PtcRunResult> {
     if (this.disposed) throw new Error('persistent PTC: run after disposal')
-    if (spec.sandboxPolicy === undefined || !isAbsolute(spec.cwd) || (spec.timeoutMs !== null && (!Number.isFinite(spec.timeoutMs) || spec.timeoutMs <= 0 || spec.timeoutMs > this.config.maxTimeoutMs))) throw new Error('persistent PTC: run requires resolved inputs with a sandbox policy')
+    if (!isAbsolute(spec.cwd) || (spec.timeoutMs !== null && (!Number.isFinite(spec.timeoutMs) || spec.timeoutMs <= 0 || spec.timeoutMs > this.config.maxTimeoutMs))) throw new Error('persistent PTC: run requires a resolved cwd and timeout')
     const bindings = validateBindings(spec)
     let kernel = spec.stateOwner === undefined ? undefined : this.owners.get(spec.stateOwner)
     kernel?.assertIdle()
-    if (kernel && !kernel.closed && (kernel.policy.mode !== spec.sandboxPolicy.mode
-      || kernel.policy.workspaceRoot !== spec.sandboxPolicy.workspaceRoot
-      || kernel.policy.sessionId !== spec.sandboxPolicy.sessionId)) {
-      throw new Error('persistent PTC: release the retained environment before changing its sandbox policy')
-    }
     let code: string
     try { code = stripTypeScriptTypes(spec.program) } catch (error: unknown) {
       const output = persistentOutput(this.config.maxOutputBytes)
@@ -351,7 +325,7 @@ export class InMemoryExecution {
     }
     if (!kernel || kernel.closed) {
       if (kernel) this.kernels.delete(kernel)
-      kernel = new Kernel(this.ctx, this.config, { ...spec.sandboxPolicy }, this.processes)
+      kernel = new Kernel(this.ctx, this.config, this.processes)
       this.kernels.add(kernel)
       if (spec.stateOwner !== undefined) this.owners.set(spec.stateOwner, kernel)
     }

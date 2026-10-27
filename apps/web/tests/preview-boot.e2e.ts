@@ -416,16 +416,16 @@ async function bootPreview(site: Site, manifest: ImageManifest, browser: Browser
       const settings = await remote<{ writable: boolean; namespaces: Setting[] }>(
         'settings/describe', {},
       )
-      const shell = settings.namespaces.find(namespace => namespace.ns === 'bash-sandbox')
-      if (shell === undefined) throw new Error('settings/describe omitted the bash-sandbox namespace')
+      const shell = settings.namespaces.find(namespace => namespace.ns === 'bash-local')
+      if (shell === undefined) throw new Error('settings/describe omitted the bash-local namespace')
       const saved = await remote<Setting>('settings/update', {
-        ns: 'bash-sandbox',
+        ns: 'bash-local',
         patch: { timeoutMs: 61_000 },
         expectedRevision: shell.revision,
       })
       const reread = await remote<{ namespaces: Setting[] }>('settings/describe', {})
       const reset = await remote<Setting>('settings/mutate', {
-        ns: 'bash-sandbox', ops: [{ op: 'unset', path: ['timeoutMs'] }], expectedRevision: saved.revision,
+        ns: 'bash-local', ops: [{ op: 'unset', path: ['timeoutMs'] }], expectedRevision: saved.revision,
       })
       await remote('settings/update', { ns: 'ui-theme', patch: { fontSize: 17 } })
       await remote('credentials/set', { ref: 'PREVIEW_TEST_SECRET', value: 'worker-only' })
@@ -439,7 +439,7 @@ async function bootPreview(site: Site, manifest: ImageManifest, browser: Browser
         settingsWritable: settings.writable,
         settingIds: settings.namespaces.map(namespace => namespace.ns),
         savedTimeout: saved.value.timeoutMs,
-        rereadTimeout: reread.namespaces.find(namespace => namespace.ns === 'bash-sandbox')?.value.timeoutMs,
+        rereadTimeout: reread.namespaces.find(namespace => namespace.ns === 'bash-local')?.value.timeoutMs,
         resetTimeout: reset.value.timeoutMs,
         initialTimeout: shell.value.timeoutMs,
         resetOverrides: reset.user,
@@ -454,7 +454,7 @@ async function bootPreview(site: Site, manifest: ImageManifest, browser: Browser
     })
     expect(exercised.settingsWritable).toBe(true)
     expect(exercised.settingIds).toEqual(expect.arrayContaining([
-      'bash-sandbox', 'locale', 'ui-theme', 'ui-chat', 'ui-conversation', 'ui-settings', 'ui-settings-general',
+      'bash-local', 'locale', 'ui-theme', 'ui-chat', 'ui-conversation', 'ui-settings', 'ui-settings-general',
     ]))
     expect(exercised.savedTimeout).toBe(61_000)
     expect(exercised.rereadTimeout).toBe(61_000)

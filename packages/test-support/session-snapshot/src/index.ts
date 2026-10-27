@@ -60,7 +60,6 @@ export {
   type SnapshotInputAttachment,
   type SnapshotInputManifest,
   type SnapshotManifest,
-  type SnapshotPermission,
   type SnapshotPlatform,
   type SnapshotProfile,
   type SnapshotRecording,

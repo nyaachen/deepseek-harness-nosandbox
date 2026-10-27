@@ -16,7 +16,6 @@ import type { UserMessage } from '@deepseek-ai/dsh-session'
 import { assertNever, deepFreeze, snapshotJsonValue, type JsonValue } from '@deepseek-ai/dsh-util-values'
 import type { PromptSection, ToolProviderResult } from '@deepseek-ai/dsh-system-prompt'
 import type { PtcRuntime } from '@deepseek-ai/dsh-ptc-runtime'
-import type {} from '@deepseek-ai/dsh-sandbox-policy'
 // Type-only: makes `ctx.get('approval')` resolve to the ApprovalService
 // augmentation. The seam stays optional at runtime — see `serviceAsk`.
 import type {} from '@deepseek-ai/dsh-user-approval'
@@ -842,14 +841,12 @@ export class ToolRuntime extends Service {
    * Reserved presentation transport, kept outside the filterable registration
    * layers. Built on first need rather than at construction: which agents run
    * a PTC mode is no longer known when the service is constructed, and the
-   * transport owns its PTC call tracking and state-owner registrations.
+   * transport owns its state-owner registrations.
    */
   private ptcTransport: ToolDefinition | undefined
-  private readonly ptcContext: Context
 
   constructor(ctx: Context, config: Config = {}) {
     super(ctx, 'tools')
-    this.ptcContext = ctx
     // The schema already defaulted an omitted mode; the ?? narrows the
     // optional-input type for direct (non-Loader) construction in tests.
     this.defaultMode = config.mode ?? 'native'
@@ -955,19 +952,13 @@ export class ToolRuntime extends Service {
         return directories.ensure(exec.agent, exec.signal)
       },
       requireRuntime: () => this.requirePtcRuntime(this.defaultMode),
-      peekApprover: () => this.ctx.get('approval'),
-      resolveSandboxPolicy: (exec) => {
-        const policy = this.ctx.get('sandboxPolicy')
-        if (policy === undefined) throw new Error('dsh-tools: confined PTC runtime requires sandboxPolicy')
-        return policy.resolve(exec.agent === undefined ? {} : { session: exec.agent.session })
-      },
       // The language-aware description/parameters getters read the runtime
       // without demanding one, so a native-default process can still project
       // the transport for an agent that chose code.
       peekRuntime: () => this.ctx.get('ptcRuntime'),
       maxParallel: this.maxParallelSubCalls,
       shapeDispatchLog: dispatch => this.shapeDispatchLog(dispatch),
-    }, this.ptcContext)
+    })
     return this.ptcTransport
   }
 

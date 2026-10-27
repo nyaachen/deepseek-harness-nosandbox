@@ -25,11 +25,11 @@ English | [中文](README.zh.md)
 <a id="use-this-package"></a>
 ## Use this package
 
-Mount this provider with [`dsh-ssh`](../ssh/README.md) and `sandboxPolicy`; use its paired SSH subprocess and sandbox providers for execution. This provider has no configuration fields: connection identity and the default workspace belong to `dsh-ssh`, while file-effect mode belongs to `sandboxPolicy`.
+Mount this provider with [`dsh-ssh`](../ssh/README.md); its paired SSH subprocess provider supplies execution. This provider has no configuration fields: connection identity and the default workspace belong to `dsh-ssh`.
 
 `resolve()` canonicalizes paths on the remote host. `processPath()` and `fileUrl()` name files in that same remote namespace; they do not grant host-side access. File URLs encode literal percent signs, backslashes and newlines without changing the filename. `processPathFromHostPath()` returns `undefined`, so consumers requiring an installed executable or bootstrap must supply a remote artifact explicitly.
 
-Reads preserve the shared filesystem error codes. Writes and edits send the resolved per-call policy to the helper, which canonicalizes the workspace and enforces it beside the atomic mutation. Lost transport reports an I/O failure; a mutation may already have committed and is not retried automatically.
+Reads preserve the shared filesystem error codes. Writes and edits ask the helper for the atomic mutation, which canonicalizes the target path first. Lost transport reports an I/O failure; a mutation may already have committed and is not retried automatically.
 
 -----
 
@@ -39,7 +39,7 @@ Reads preserve the shared filesystem error codes. Writes and edits send the reso
 <details>
 <summary>Implementation internals — click to expand</summary>
 
-The helper reuses [`fs-local`](../../fs/fs-local/README.md) and [`fs-sandbox`](../../fs/fs-sandbox/README.md), preserving symlink identity, stale-version rejection, diff bases and publication semantics. UTF-8 streaming uses bounded pull requests and closes its remote iterator when the consumer stops early.
+The helper reuses [`fs-local`](../../fs/fs-local/README.md), preserving symlink identity, stale-version rejection, diff bases and publication semantics. UTF-8 streaming uses bounded pull requests and closes its remote iterator when the consumer stops early.
 
 </details>
 

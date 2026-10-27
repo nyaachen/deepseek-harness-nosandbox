@@ -202,7 +202,7 @@ const LEGACY_SECTION_ENTRIES: Record<string, string> = {
   'ui-developer-tools': 'ui-settings',
   'ui-onboarding': 'ui-settings-general',
   /* v8 ignore next -- the base bundle composes one shell executor per platform */
-  shell: process.platform === 'win32' ? 'pwsh-sandbox' : 'bash-sandbox',
+  shell: process.platform === 'win32' ? 'pwsh-local' : 'bash-local',
 }
 
 /** Resolve the inherited layers alone, or keep their raw values when required fields arrive only through the profile.

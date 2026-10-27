@@ -15,7 +15,6 @@ import { SessionId } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-agent-preset-registry'
 import type {} from '@deepseek-ai/dsh-hmr'
 import type {} from '@deepseek-ai/dsh-plugin-manager'
-import type {} from '@deepseek-ai/dsh-permission-presets'
 import type {} from '@deepseek-ai/dsh-session-title-llm'
 import type {} from '@deepseek-ai/dsh-skill'
 import type {} from '@deepseek-ai/dsh-tools'
@@ -144,7 +143,6 @@ describe.skipIf(!existsSync(join(root, 'apps/cli/lib/bin.js')))('Official option
       setup: scoped => ctx.agentPresets.mount(scoped, preset).then(() => undefined),
     })
     handles.add(handle)
-    ctx.permissionPresets.set(handle.agent.session, 'danger-full-access')
     return handle
   }
 

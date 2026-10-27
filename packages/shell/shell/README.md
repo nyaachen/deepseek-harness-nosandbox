@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-Use `ctx.shell` to run shell commands with bounded output or keep them running as background work. One execution handle supports foreground results and background reads. A profile can select local or sandboxed Bash or PowerShell execution without changing callers. Resolve requests before execution to make the working directory, timeout, and output limits explicit. Command exits, timeouts, and caller aborts return results; only infrastructure failures reject, while the `bash` and `pwsh` tools own model-visible rendering and sandbox guidance.
+Use `ctx.shell` to run shell commands with bounded output or keep them running as background work. One execution handle supports foreground results and background reads. A profile can select local Bash or PowerShell execution without changing callers. Resolve requests before execution to make the working directory, timeout, and output limits explicit. Command exits, timeouts, and caller aborts return results; only infrastructure failures reject, while the `bash` and `pwsh` tools own model-visible rendering and command guidance.
 
 ## Table of Contents
 
@@ -53,7 +53,7 @@ Every execution starts from a `ShellExecRequest` with optional fields; the execu
 
 ### Choosing and composing an executor
 
-The seam is not an executor: mount exactly one provider per composition, and the tools work unchanged. On POSIX, `dsh-bash-local` runs commands as fresh `bash -c` processes and `dsh-bash-sandbox` confines every command through the sandbox capability; on Windows, `dsh-pwsh-local` and `dsh-pwsh-sandbox` are the counterparts. The `bash` and `pwsh` tools advertise escalation fields only while a sandboxing executor is mounted. The smallest composition is the executor alone:
+The seam is not an executor: mount exactly one provider per composition, and the tools work unchanged. On POSIX, `dsh-bash-local` runs commands as fresh `bash -c` processes; on Windows, `dsh-pwsh-local` is the counterpart. The smallest composition is the executor alone:
 
 ```yaml
 - id: bash
@@ -88,7 +88,7 @@ The package is one role of a standard capability seam: the Service Definition th
 | File | Role |
 |---|---|
 | [`src/index.ts`](src/index.ts) | Plugin entry: abstract `ShellExecutor` service and the shared settings namespace |
-| [`src/types.ts`](src/types.ts) | Request/spec vocabulary, `ShellExecution`, `ShellRunResult`, and sandbox facts |
+| [`src/types.ts`](src/types.ts) | Request/spec vocabulary, `ShellExecution`, and `ShellRunResult` |
 | [`src/render.ts`](src/render.ts) | `parseExitStatus`: the exit-status marker contract the shell tools share |
 
 ### Settings namespace
@@ -110,7 +110,6 @@ Read these pages when the seam contract is not enough. They move from the shared
 
 - [Bash executor subsystem](../../../docs/subsystems/shell.md) — the request/spec vocabulary, results, and service contract in full.
 - [bash-local](../bash-local/README.md) — the default POSIX executor: fresh `bash -c` processes, budgets, and deadlines.
-- [bash-sandbox](../bash-sandbox/README.md) — the confining executor: sandbox modes, denials, and escalation.
 - [tool-bash](../tool-bash/README.md) — the model-facing `bash` tool over this seam.
 - [Capability seams note](../../../.agents/notes/implemented/architecture/2026-06-13-capability-seams.md) — the Service Definition / Provider / Consumer split this seam follows.
 
@@ -119,7 +118,7 @@ Read these pages when the seam contract is not enough. They move from the shared
 <a id="model-experience"></a>
 ## Model Experience
 
-Indirectly, through `dsh-tool-bash`, which turns executor output and sandbox facts into guidance and retained tool-result tokens.
+Indirectly, through `dsh-tool-bash`, which turns executor output into guidance and retained tool-result tokens.
 
 #### KV Cache effect
 

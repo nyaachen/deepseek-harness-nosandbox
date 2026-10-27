@@ -5,17 +5,14 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import type { Readable, Writable } from 'node:stream'
 import { Context } from '@deepseek-ai/cordis'
 import { FsError, type FsTarget, type FsWriteIntent, type FsVersion } from '@deepseek-ai/dsh-fs'
-import { SandboxedFileSystem } from '@deepseek-ai/dsh-fs-sandbox'
+import { LocalFileSystem } from '@deepseek-ai/dsh-fs-local'
 import type {} from '@deepseek-ai/dsh-subprocess'
 import { LocalSubprocessRuntime } from '@deepseek-ai/dsh-subprocess-local'
-import { LocalSandboxProvider } from '@deepseek-ai/dsh-sandbox-local'
-import { SandboxPolicyService } from '@deepseek-ai/dsh-sandbox-policy'
 import { SessionProjectionRegistry } from '@deepseek-ai/dsh-session-projection'
-import type { SandboxExecutionPolicy, SandboxPolicy } from '@deepseek-ai/dsh-sandbox'
 import { z } from 'zod'
 import { SshRpcPeer, RemoteOperationError, SSH_MAX_PROCESS_HANDLES, SSH_MAX_TEXT_STREAMS, SSH_PROTOCOL_VERSION } from './protocol.ts'
 import { RemoteProcesses } from './helper-processes.ts'
-import { editSchema, environmentSchema, intentSchema, policySchema, processIdSchema, remotePath, targetSchema, textStreamIdSchema } from './schemas.ts'
+import { editSchema, environmentSchema, intentSchema, processIdSchema, remotePath, targetSchema, textStreamIdSchema } from './schemas.ts'
 import type { SshTextStreamId } from './schemas.ts'
 
 const MAX_FRAME_BYTES = 64 * 1024 * 1024
@@ -27,10 +24,8 @@ const textStreamIdRequest = z.object({ id: textStreamIdSchema }).strict()
 async function services() {
   const ctx = new Context()
   const fibers = [await ctx.plugin(SessionProjectionRegistry)]
-  fibers.push(await ctx.plugin(SandboxPolicyService, { mode: 'read-only', workspaceRoot: process.cwd() }))
-  fibers.push(await ctx.plugin(SandboxedFileSystem, { cwd: process.cwd() }))
+  fibers.push(await ctx.plugin(LocalFileSystem, { cwd: process.cwd() }))
   fibers.push(await ctx.plugin(LocalSubprocessRuntime))
-  fibers.push(await ctx.plugin(LocalSandboxProvider))
   return { ctx, close: async () => { for (const fiber of fibers.reverse()) await fiber.dispose() } }
 }
 
@@ -84,11 +79,6 @@ export async function runSshHelper(transport: HelperTransport): Promise<void> {
   const touchLease = (): void => {
     if (lease !== undefined) clearTimeout(lease)
     lease = setTimeout(() => { peer.close(new Error('SSH helper client lease expired')) }, leaseMs)
-  }
-  const policy = async (raw: unknown, signal: AbortSignal): Promise<SandboxExecutionPolicy> => {
-    const parsed = policySchema.parse(raw)
-    const target = await ctx.fs.resolve(parsed.workspaceRoot, { signal })
-    return { ...parsed, workspaceRoot: ctx.fs.processPath(target) } as SandboxExecutionPolicy
   }
   const asTarget = (raw: unknown): FsTarget => targetSchema.parse(raw) as FsTarget
   const peer = new SshRpcPeer(transport.input, transport.output, MAX_FRAME_BYTES, 128, async (method, raw, requestSignal) => {
@@ -145,12 +135,6 @@ export async function runSshHelper(transport: HelperTransport): Promise<void> {
         }
         throw error
       }
-    }
-    if (method === 'sandbox') {
-      const input = z.object({ argv: z.array(z.string()).min(1), policy: policySchema }).strict().parse(raw)
-      const resolved = await policy(input.policy, signal)
-      if (resolved.mode === 'danger-full-access') throw new Error('Unconfined argv does not need a sandbox wrapper')
-      return ctx.sandbox.confine(input.argv, resolved as SandboxPolicy, signal)
     }
     if (method === 'fs.resolve' || method === 'fs.lstat') {
       const input = z.object({ path: z.string(), cwd: remotePath.optional() }).strict().parse(raw)
@@ -228,19 +212,18 @@ export async function runSshHelper(transport: HelperTransport): Promise<void> {
     if (method === 'fs.write' || method === 'fs.edit') {
       const input = z.object({
         target: targetSchema, content: z.string().optional(), edit: editSchema.optional(),
-        expected: z.union([intentSchema, z.object({ version: z.string() }).strict()]).optional(), policy: policySchema,
+        expected: z.union([intentSchema, z.object({ version: z.string() }).strict()]).optional(),
       }).strict().parse(raw)
       const target = asTarget(input.target)
-      const resolved = await policy(input.policy, signal)
       if (method === 'fs.write') return ctx.fs.writeText(
         target, z.string().parse(input.content),
-        input.expected === undefined ? undefined : intentSchema.parse(input.expected) as FsWriteIntent, signal, resolved,
+        input.expected === undefined ? undefined : intentSchema.parse(input.expected) as FsWriteIntent, signal,
       )
       return ctx.fs.editText(
         target, editSchema.parse(input.edit),
         input.expected === undefined
           ? undefined : z.object({ version: z.string() }).strict().parse(input.expected) as { version: FsVersion },
-        signal, resolved,
+        signal,
       )
     }
     throw new Error(`Unknown SSH helper operation: ${method}`)

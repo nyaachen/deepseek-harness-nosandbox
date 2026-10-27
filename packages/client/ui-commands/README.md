@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-Typing a `/` command opens a registered popup, a client action, a host command's input, or direct execution; a command line is never silently downgraded to a plain prompt. Business packages register popupSelect specs (`/model`, `/permission`) or actions through `ctx.commandUi`, or decorate existing host commands with either kind while preserving their catalog rows and argument claims. Space and Enter resolve the line against the session's directory: a host descriptor with `input` is `leadingInput`, a registered `CommandUiSpec` is `popupSelect` or `action`, and everything else is `execute`.
+Typing a `/` command opens a registered popup, a client action, a host command's input, or direct execution; a command line is never silently downgraded to a plain prompt. Business packages register popupSelect specs (`/model`) or actions through `ctx.commandUi`, or decorate existing host commands with either kind while preserving their catalog rows and argument claims. Space and Enter resolve the line against the session's directory: a host descriptor with `input` is `leadingInput`, a registered `CommandUiSpec` is `popupSelect` or `action`, and everything else is `execute`.
 
 ## Table of Contents
 
@@ -25,7 +25,7 @@ Typing a `/` command opens a registered popup, a client action, a host command's
 <a id="use-this-package"></a>
 ## Use this package
 
-Mount this plugin alongside `ui-input-trigger` and `ui-conversation`; the `/` source then appears in the trigger menu, and business packages register their command surfaces through `ctx.commandUi`. Typing `/model` opens the registered popup; a host command with an argument claim opens its input or executes directly. The popup holds composer focus: typing filters the loaded rows locally, `↑`/`↓` walk them, Enter and `Tab` accept the highlighted row, and Escape and `Shift+Tab` return to the composer. The highlight opens on the row the options mark as the session's current value, so accepting on a freshly opened panel confirms it. The composer's `+` button and a typed `/` open the same menu: an Add section (File, Goal, Plan, Feedback) and a Commands section (Compact, Permission, Model, Export) in usage order, each row with a glyph, a localized title and description, and the command name as an alias where the localized title differs from it.
+Mount this plugin alongside `ui-input-trigger` and `ui-conversation`; the `/` source then appears in the trigger menu, and business packages register their command surfaces through `ctx.commandUi`. Typing `/model` opens the registered popup; a host command with an argument claim opens its input or executes directly. The popup holds composer focus: typing filters the loaded rows locally, `↑`/`↓` walk them, Enter and `Tab` accept the highlighted row, and Escape and `Shift+Tab` return to the composer. The highlight opens on the row the options mark as the session's current value, so accepting on a freshly opened panel confirms it. The composer's `+` button and a typed `/` open the same menu: an Add section (File, Goal, Plan, Feedback) and a Commands section (Compact, Model, Export) in usage order, each row with a glyph, a localized title and description, and the command name as an alias where the localized title differs from it.
 
 ### Kinds and decorations
 

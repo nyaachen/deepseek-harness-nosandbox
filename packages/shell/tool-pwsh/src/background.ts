@@ -6,54 +6,27 @@
  * @module @deepseek-ai/dsh-tool-pwsh/background
  */
 
-import type { SandboxMode } from '@deepseek-ai/dsh-sandbox'
-import { escalationHintMarker, sandboxDenialMarker } from '@deepseek-ai/dsh-sandbox'
-import type { ShellProcess, ShellSandboxInfo } from '@deepseek-ai/dsh-shell'
+import type { ShellProcess } from '@deepseek-ai/dsh-shell'
 import type { JobChunk, JobHooks, JobOutcome, JobOutputSource } from '@deepseek-ai/dsh-jobs'
 
 /* jscpd:ignore-start -- deliberate twin of dsh-tool-bash/background.ts (Agent Note). */
 
 /**
- * Sandbox facts worth the terminal detail: a runner that never ran the
- * command, or a denial (with the escalation hint this composition offers).
- * @param sandbox - settled sandbox facts, when this was a confined process.
- * @param escalationModes - escalation targets advertised by this composition.
- * @returns the markers to append, oldest first.
- */
-function sandboxNotes(sandbox: ShellSandboxInfo | undefined, escalationModes: readonly SandboxMode[]): string[] {
-  if (sandbox?.runnerFailed) {
-    return [`[sandbox: the sandbox runner itself failed under ${sandbox.mode} mode — the command did not run; this is a sandbox problem, not a command failure]`]
-  }
-  if (sandbox?.denied) {
-    const notes = [sandboxDenialMarker(sandbox.mode)]
-    if (escalationModes.length > 0) notes.push(escalationHintMarker('command'))
-    return notes
-  }
-  return []
-}
-
-/**
  * Map a settled background process onto the generic job-outcome vocabulary:
  * `killed` stays `killed` (detail: the signal when one is known), everything
  * else is `completed` with the exit code as detail. A nonzero command exit is
- * reported, not failed, exactly like the foreground rendering. Sandbox facts
- * join the detail, since a job's terminal reason is the one line every
- * reader — the model's status line, the roster row — shows.
+ * reported, not failed, exactly like the foreground rendering.
  * @param proc - the settled process handle.
- * @param escalationModes - escalation targets advertised by this composition.
  * @returns the outcome for the `ctx.jobs` registration.
  */
-export function processOutcome(proc: ShellProcess, escalationModes: readonly SandboxMode[] = []): JobOutcome {
+export function processOutcome(proc: ShellProcess): JobOutcome {
   // TODO(background-infrastructure-outcome): widen ShellProcess with an explicit
-  // infrastructure-failure outcome, then map spawn failures and
-  // sandbox.runnerFailed to job `failed`. The current contract aliases a spawn
-  // failure with a signal-less kill and a runner failure with an ordinary
-  // wrapper exit; real nonzero command exits must remain `completed`.
-  const base: JobOutcome = proc.status === 'killed'
+  // infrastructure-failure outcome, then map a spawn failure to job `failed`.
+  // The current contract aliases a spawn failure with a signal-less kill;
+  // real nonzero command exits must remain `completed`.
+  return proc.status === 'killed'
     ? { status: 'killed', detail: proc.signal !== null ? `signal: ${proc.signal}` : 'killed before exit' }
     : { status: 'completed', detail: `exit code: ${proc.exitCode ?? 0}` }
-  const notes = sandboxNotes(proc.sandbox, escalationModes)
-  return notes.length === 0 ? base : { ...base, detail: `${base.detail}; ${notes.join(' ')}` }
 }
 
 /**

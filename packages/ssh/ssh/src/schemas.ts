@@ -20,8 +20,6 @@ export const targetSchema = z.object({ targetKey: remotePath, displayPath: z.str
 export const infoSchema = z.object({ version: z.string(), type: z.enum(['file', 'directory', 'other']), size: z.number().nonnegative().optional() }).strict()
 /** Metadata that preserves a final symlink. */
 export const pathInfoSchema = infoSchema.extend({ type: z.enum(['file', 'directory', 'symlink', 'other']) })
-/** A resolved file-effect policy; the remote helper owns path canonicalization. */
-export const policySchema = z.object({ mode: z.enum(['read-only', 'workspace-write', 'danger-full-access']), workspaceRoot: remotePath, sessionId: z.string().optional() }).strict()
 /** Complete directory entries. */
 export const entriesSchema = z.array(z.object({ name: z.string(), type: z.enum(['file', 'directory', 'other']), target: targetSchema, version: z.string().optional(), size: z.number().nonnegative().optional() }).strict())
 /** Guarded write intent. */

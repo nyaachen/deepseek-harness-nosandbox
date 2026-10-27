@@ -9,4 +9,3 @@ header:
 replay:
   override: true
 platform: posix
-permission: danger-full-access

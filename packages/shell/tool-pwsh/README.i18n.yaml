@@ -3,14 +3,14 @@
 # After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write packages/shell/tool-pwsh/README.md
 /:
-  en: 83e748b077469aac
-  zh: f858d23ea8c1c6ba
+  en: 33f913a085a3a983
+  zh: 0a95a0291ea5af6e
 /deepseek-ai-dsh-tool-pwsh:
   en: 7e214a666e7b1ef8
   zh: d9166b57a6f54afd
 /deepseek-ai-dsh-tool-pwsh/summary:
-  en: c0470c24b1056b6c
-  zh: 8d9fcd643367e1c9
+  en: fe6dbd1b0f2eff59
+  zh: f6c07a9437c3ba52
 /deepseek-ai-dsh-tool-pwsh/table-of-contents:
   en: d152484eb41ac6b4
   zh: 09388d293f9be9cb
@@ -29,27 +29,24 @@
 /deepseek-ai-dsh-tool-pwsh/use-this-package/foreground-commands-as-jobs:
   en: 4a487e48ef146846
   zh: 0a34dc49bffb03af
-/deepseek-ai-dsh-tool-pwsh/use-this-package/windows-specific-sandbox-behavior:
-  en: 76f3f791f53d1005
-  zh: e5b262db24e6eb83
 /deepseek-ai-dsh-tool-pwsh/use-this-package/what-can-go-wrong:
-  en: c1a9cc1201ed3a89
-  zh: a43a659d350e9d4a
+  en: 42162ffaedc8b24f
+  zh: 2192cc6e532ca022
 /deepseek-ai-dsh-tool-pwsh/understand-the-implementation:
   en: 165313776a851b51
   zh: 828f48807036aff0
 /deepseek-ai-dsh-tool-pwsh/understand-the-implementation/design-philosophy:
-  en: 86a8ad5203f7e239
-  zh: 056c0d6d6ca5f36a
+  en: f0335e4c72bca9d0
+  zh: 4f7394ea7e122196
 /deepseek-ai-dsh-tool-pwsh/understand-the-implementation/source-map:
-  en: aa2adb29a0f27fcd
-  zh: 612829167064acd1
+  en: 3669bba01f727089
+  zh: 7e2349f5b08dde26
 /deepseek-ai-dsh-tool-pwsh/understand-the-implementation/rendering-and-exit-markers:
   en: facd01af9a403fec
   zh: 7a943dac19a01c39
 /deepseek-ai-dsh-tool-pwsh/further-exploration:
-  en: 8b2f3ab83ada2fe5
-  zh: b7803b21d5373ece
+  en: 3fe2a4de87c951eb
+  zh: 8dc7672226133240
 /deepseek-ai-dsh-tool-pwsh/model-experience:
   en: 215e7ba838619b7b
   zh: a311da3843709f90
@@ -72,8 +69,8 @@
   en: 3039bc5e7a796b21
   zh: 6b7a9eaf69c9ea53
 /deepseek-ai-dsh-tool-pwsh/model-experience/tool-schemas/what-the-model-sees:
-  en: 319b3a4512305a26
-  zh: fed6a1c70bf79a0e
+  en: 74ab02476c1e08e3
+  zh: 3327fa00a5e38833
 /deepseek-ai-dsh-tool-pwsh/model-experience/tool-schemas/token-effect:
   en: 97cce067584eadff
   zh: 54b1f5cd5899e7f3
@@ -84,8 +81,8 @@
   en: d83f1f25a3719c54
   zh: 445ca808e28dc936
 /deepseek-ai-dsh-tool-pwsh/model-experience/foreground-result/what-the-model-sees:
-  en: f3691c5a09006efe
-  zh: 4e9fb6880fb3b0df
+  en: 5fd83f2227690b8b
+  zh: 94e9ac6a97a5132a
 /deepseek-ai-dsh-tool-pwsh/model-experience/foreground-result/token-effect:
   en: b2018adbda15b8a7
   zh: efa06f083800a36b
@@ -108,8 +105,8 @@
   en: 2d4f2c8605eccab3
   zh: 67f1f0218f73c6bf
 /deepseek-ai-dsh-tool-pwsh/model-experience/tool-errors/what-the-model-sees:
-  en: f0802a10dbe0f7d2
-  zh: 80f8b312dcfc0065
+  en: 16e961fb893bc709
+  zh: 8cb84ca9a137dc62
 /deepseek-ai-dsh-tool-pwsh/model-experience/tool-errors/token-effect:
   en: 243bad012dd99c7f
   zh: 5ee74905020bd49a
@@ -117,8 +114,8 @@
   en: f5d5f97a153f7c70
   zh: 31911b4f3506d6c8
 /deepseek-ai-dsh-tool-pwsh/known-limitations-and-deferred-work:
-  en: 04c2102bcc5ebc6d
-  zh: d13640d3fddb8e9c
+  en: 7afd13d91ca9dbb4
+  zh: ed6657cdd0233ea0
 /deepseek-ai-dsh-tool-pwsh/known-limitations-and-deferred-work/dev-note:
   en: e67f633dc6fe7773
   zh: 3bb0c20c93f16f98

@@ -292,7 +292,7 @@ describe('web e2e: plugin configuration pages', () => {
     onTestFailed(() => saveFailureShot(page, 'web-e2e-plugin-config-write'))
     const panel = await openPlugins()
     await openPage(panel, '终端')
-    const entry = [...scaffold.ctx.loader.entries()].find(row => row.options.id === 'bash-sandbox')!
+    const entry = [...scaffold.ctx.loader.entries()].find(row => row.options.id === 'bash-local')!
     const fiber = entry.fiber
 
     const timeout = panel.getByLabel('命令超时（毫秒）')

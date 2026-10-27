@@ -1,9 +1,10 @@
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdtempSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { mkdtemp, writeFile } from 'node:fs/promises'
+import { createServer, type Socket } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join, relative, resolve } from 'node:path'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import { createRuntimeContext } from './setup.ts'
 import { PythonPtcRuntime, hostFrameParseCeiling, readProcessStart, resolvePythonBin } from '../src/index.ts'
 import { logTruncationMarker } from '../src/protocol.ts'
@@ -73,24 +74,20 @@ describe('PythonPtcRuntime — seam descriptors and misuse', () => {
     const { runtime } = await setup()
     expect(runtime.language).toBe('python')
     expect(runtime.isolation).toBe('process')
-    expect(runtime.executionInstructions).toBe('The program is the body of an async Python function. Top-level await and return are supported. Emit output with print(...) or return a lossless JSON value. Only printed values and the returned value become program output. Each call runs in a fresh Python process; variables and imported modules do not persist across calls. Relative paths use the supplied working directory; only TMPDIR is set in the environment. Direct filesystem access follows this execution\'s sandbox policy.')
+    expect(runtime.executionInstructions).toBe('The program is the body of an async Python function. Top-level await and return are supported. Emit output with print(...) or return a lossless JSON value. Only printed values and the returned value become program output. Each call runs in a fresh Python process; variables and imported modules do not persist across calls. Relative paths use the supplied working directory; only TMPDIR is set in the environment.')
   })
 
   it('resolves its configured deadline and cwd while refusing unsupported execution choices', async () => {
     const { runtime, fiber } = await setup({ maxWallMs: 30_000 })
     try {
       const request = { program: 'return 1', bindings: [] }
-      expect(runtime.sandboxMode).toBe('danger-full-access')
-      expect(runtime.resolve(request)).toEqual({ ...request, cwd: process.cwd(), timeoutMs: 30_000, sandboxPolicy: { mode: 'danger-full-access', workspaceRoot: process.cwd() } })
+      expect(runtime.resolve(request)).toEqual({ ...request, cwd: process.cwd(), timeoutMs: 30_000 })
       const cwd = await makeTempDir('dsh-py-resolved-cwd-')
       const spec = runtime.resolve({ ...request, cwd })
       expect(spec.cwd).toBe(cwd)
       expect(() => runtime.resolve({ ...request, cwd: 'relative' })).toThrow('cwd must be absolute')
       expect(() => runtime.resolve({ ...request, timeoutMs: 1 })).toThrow('per-call timeout is unsupported')
       expect(() => runtime.resolve({ ...request, timeoutMs: null })).toThrow('per-call timeout is unsupported')
-      const sandboxPolicy = { mode: 'danger-full-access' as const, workspaceRoot: cwd }
-      expect(runtime.resolve({ ...request, sandboxPolicy }).sandboxPolicy).toBe(sandboxPolicy)
-      await expect(runtime.run({ ...request, cwd, timeoutMs: 30_000 })).rejects.toThrow('run requires a resolved sandbox policy')
       await expect(runtime.run({ ...spec, cwd: 'relative' })).rejects.toThrow('cwd must be absolute')
       await expect(runtime.run({ ...spec, timeoutMs: 1 })).rejects.toThrow('unsupported execution timeout')
       await expect(runtime.run({ ...spec, timeoutMs: null })).rejects.toThrow('unsupported execution timeout')
@@ -185,9 +182,6 @@ describe('PythonPtcRuntime — seam descriptors and misuse', () => {
       "import { Context } from '@deepseek-ai/cordis'",
       "import { PythonPtcRuntime } from './packages/experimental/ptc-runtime-python/src/index.ts'",
       'const ctx = new Context()',
-      "await ctx.plugin((await import('./packages/session/session-projection/src/index.ts')).default)",
-      "await ctx.plugin((await import('./packages/sandbox/sandbox-policy/src/index.ts')).default, { mode: 'danger-full-access' })",
-      "await ctx.plugin((await import('./packages/sandbox/sandbox-local/src/index.ts')).default, {})",
       'try {',
       '  await ctx.plugin(PythonPtcRuntime, { maxValueBytes: 50 * 1024 * 1024, addressSpaceMb: 1024 })',
       "  console.log('LOADED')",
@@ -3019,6 +3013,50 @@ describe('PythonPtcRuntime — budgets, termination, disposal', () => {
     const result = await pending
     expect(['abort', 'worker-exit']).toContain(result.error?.kind)
   }, 5000)
+
+  it.each(['abort', 'dispose', 'timeout'] as const)('closes a running program socket on %s', async (stop) => {
+    // Having the run settle is not the same as the child being gone: a program
+    // holding a socket keeps its peer's connection open until the process dies,
+    // so the peer-side close is the observable proof that teardown reached the
+    // process, not just the run's result.
+    const { fiber, runtime } = await setup({ maxWallMs: stop === 'timeout' ? 5_000 : 30_000 })
+    const connected = Promise.withResolvers<Socket>()
+    let socket: Socket | undefined
+    const server = createServer((accepted) => { socket = accepted; connected.resolve(accepted) })
+    onTestFinished(async () => {
+      socket?.destroy()
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => { if (error === undefined) resolve(); else reject(error) })
+      })
+    })
+    await new Promise<void>((resolve, reject) => {
+      server.once('error', reject)
+      server.listen(0, '127.0.0.1', resolve)
+    })
+    const address = server.address()
+    if (address === null || typeof address === 'string') throw new Error('expected TCP address')
+    const entered = Promise.withResolvers<undefined>()
+    const controller = new AbortController()
+    const pending = runtime.run(runtime.resolve({
+      program: `import socket,asyncio\nconnection = socket.create_connection(("127.0.0.1", ${address.port}))\nawait tools.ready(None)\nawait asyncio.Event().wait()`,
+      bindings: [{ global: 'tools', functions: { ready: async () => { entered.resolve(undefined); return null } } }],
+      signal: controller.signal,
+    }))
+    try {
+      await entered.promise
+      socket = await connected.promise
+      const closed = new Promise<void>((resolve) => { socket!.once('close', () => { resolve() }); socket!.resume() })
+      if (stop === 'abort') controller.abort('stop program')
+      else if (stop === 'dispose') await fiber.dispose()
+      const result = await pending
+      await closed
+      expect(result.error?.kind).toBe(stop === 'timeout' ? 'timeout' : 'abort')
+      expect(socket.destroyed).toBe(true)
+    } finally {
+      controller.abort('test cleanup')
+      await pending
+    }
+  }, 30_000)
 
   it('reports an interpreter removed after load as worker-exit', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'dsh-python-removed-'))

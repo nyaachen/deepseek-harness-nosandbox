@@ -126,36 +126,6 @@ function fakeChildBackpressuredThenDestroyed(): { child: EventEmitter; proto: Pa
 }
 
 describe('PythonPtcRuntime — controlled subprocess pipes', () => {
-  it.each([
-    { asynchronous: false, runnerEvidence: false },
-    { asynchronous: false, runnerEvidence: true },
-    { asynchronous: true, runnerEvidence: false },
-    { asynchronous: true, runnerEvidence: true },
-  ])('attributes spawn failures only to an identified runner: $asynchronous / $runnerEvidence', async ({ asynchronous, runnerEvidence }) => {
-    const stdin = new PassThrough()
-    const stdout = new PassThrough()
-    const stderr = new PassThrough()
-    const proto = new PassThrough()
-    const child = Object.assign(new EventEmitter(), { stdin, stdout, stderr, stdio: [stdin, stdout, stderr, proto] })
-    onTestFinished(() => { for (const stream of [stdin, stdout, stderr, proto]) stream.destroy() })
-    const ctx = await createRuntimeContext({ mode: 'read-only' })
-    vi.spyOn(ctx.sandbox, 'confine').mockImplementation(async argv => ({
-      argv: [...argv], enforcement: 'partial', denialSignatures: [], runnerFailureRules: [],
-    }))
-    spawnMock.mockImplementation((bin: string) => {
-      const error = Object.assign(new Error('executable disappeared'), {
-        code: 'ENOENT', path: runnerEvidence ? bin : '/another-program', syscall: 'spawn',
-      })
-      if (!asynchronous) throw error
-      setImmediate(() => child.emit('error', error))
-      return child
-    })
-    await ctx.plugin(PythonPtcRuntime)
-    const result = await ctx.ptcRuntime.run(ctx.ptcRuntime.resolve({ program: 'return 42', bindings: [] }))
-    expect(result.error?.kind).toBe(runnerEvidence ? 'sandbox-unavailable' : 'worker-exit')
-    expect(result.sandbox).toEqual({ mode: 'read-only', denied: false, enforcement: 'partial' })
-  })
-
   it.each(['synchronous', 'asynchronous'] as const)('reports %s bootstrap source transport failure', async (failure) => {
     const stdin = new PassThrough()
     const stdout = new PassThrough()
@@ -176,39 +146,6 @@ describe('PythonPtcRuntime — controlled subprocess pipes', () => {
     expect(result.error?.message).toContain('failed to load python bootstrap')
     expect(result.value).toBeUndefined()
     stdin.emit('error', error)
-  })
-
-  it('preserves a runner refusal that arrives after the bootstrap source pipe closes', async () => {
-    const stdin = new PassThrough()
-    const stdout = new PassThrough()
-    const stderr = new PassThrough()
-    const proto = new PassThrough()
-    const pid = 900001
-    const child = Object.assign(new EventEmitter(), { pid, stdin, stdout, stderr, stdio: [stdin, stdout, stderr, proto] })
-    const kill = process.kill.bind(process)
-    const killGroup = vi.spyOn(process, 'kill').mockImplementation((target, signal) => {
-      if (target !== -pid) return kill(target, signal)
-      throw Object.assign(new Error('fixture process group has exited'), { code: 'ESRCH' })
-    })
-    onTestFinished(() => { killGroup.mockRestore(); for (const stream of [stdin, stdout, stderr, proto]) stream.destroy() })
-    const ctx = await createRuntimeContext({ mode: 'read-only' })
-    vi.spyOn(ctx.sandbox, 'confine').mockImplementation(async argv => ({
-      argv: [...argv], enforcement: 'full', denialSignatures: ['permission denied'],
-      runnerFailureRules: [{ allowedExitCodes: [127], fatalSignatures: ['sandbox-fatal:'] }],
-    }))
-    spawnMock.mockImplementation(() => {
-      setImmediate(() => {
-        stdin.emit('error', Object.assign(new Error('source pipe closed'), { code: 'EPIPE' }))
-        stderr.emit('data', Buffer.from('sandbox-fatal: permission denied\n'))
-        child.emit('close', 127, null)
-      })
-      return child
-    })
-    await ctx.plugin(PythonPtcRuntime)
-    const result = await ctx.ptcRuntime.run(ctx.ptcRuntime.resolve({ program: 'return 42', bindings: [] }))
-    expect(result.error?.kind).toBe('sandbox-unavailable')
-    expect(result.error?.message).toContain('sandbox-fatal: permission denied')
-    expect(result.sandbox).toEqual({ mode: 'read-only', denied: false, enforcement: 'full' })
   })
 
   it('preserves pending replies across compaction while the pipe stays backpressured', async () => {

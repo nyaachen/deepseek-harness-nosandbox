@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-Create an isolated checkout from a local commit and continue the same Session in it. Each operation creates a new named branch and leaves the source checkout intact. The existing sandbox governs all writes. Leaving the checkout retains its files and branch.
+Create an isolated checkout from a local commit and continue the same Session in it. Each operation creates a new named branch and leaves the source checkout intact. Leaving the checkout retains its files and branch.
 
 ## Table of Contents
 
@@ -25,7 +25,7 @@ Create an isolated checkout from a local commit and continue the same Session in
 <a id="use-this-package"></a>
 ## Use this package
 
-Mount the service alongside `workingDirectory`, `fs`, `subprocess`, `sandbox`, and `sandboxPolicy` providers. Add the tool package when models need the operation.
+Mount the service alongside `workingDirectory`, `fs`, and `subprocess` providers. Add the tool package when models need the operation.
 
 ```yaml
 - name: '@deepseek-ai/dsh-experimental-worktree'
@@ -44,7 +44,7 @@ The default checkout directory is `<current checkout root>/.agents/worktrees/<na
 <details>
 <summary>Implementation internals — click to expand</summary>
 
-Git and directory allocation run through the mounted subprocess and sandbox providers with the calling Session's existing file policy. Creation does not widen write access to the destination or shared Git administration directory. Directory creation claims the destination exclusively; cancellation and failed setup can leave retained artifacts, whose path appears in the error. Service disposal aborts pending operations and waits for their settlement.
+Git and directory allocation run through the mounted subprocess provider. Directory creation claims the destination exclusively; cancellation and failed setup can leave retained artifacts, whose path appears in the error. Service disposal aborts pending operations and waits for their settlement.
 
 | Source | Responsibility |
 |---|---|
@@ -85,7 +85,7 @@ This package contributes no prompt text. Its consumers own the appended tool res
 - **Retained artifacts** — leaving a worktree keeps its branch and files. Setup failures can also retain partial artifacts; removal, pruning, and branch deletion belong to the user or another consumer.
 - **Local revisions only** — creation does not fetch commits or missing partial-clone objects, initialize submodules, install dependencies, or copy uncommitted files. On Git that meets the execution requirements, missing local objects cause creation to fail.
 - **Filtered representations** — checkout skips configured filters to avoid executing repository-configured programs or triggering implicit downloads. Git LFS pointers and encrypted blobs stay in their stored representation; hydration or decryption is a separate user-controlled operation.
-- **Execution requirements** — the subprocess provider must offer Git and Node in the same execution world as the filesystem provider. Git must honor `GIT_NO_LAZY_FETCH`, which Git 2.45 and the 2.39.4, 2.40.2, 2.41.1, 2.42.2, 2.43.4, and 2.44.1 maintenance releases do; older releases ignore it and proceed instead of failing, so creation can fetch missing partial-clone objects from a promisor remote. The `git --no-lazy-fetch` option would reject these releases, but it exists only in Git 2.45 and later and also rejects the patched maintenance releases. The existing sandbox must permit all checkout and shared Git metadata writes.
+- **Execution requirements** — the subprocess provider must offer Git and Node in the same execution world as the filesystem provider. Git must honor `GIT_NO_LAZY_FETCH`, which Git 2.45 and the 2.39.4, 2.40.2, 2.41.1, 2.42.2, 2.43.4, and 2.44.1 maintenance releases do; older releases ignore it and proceed instead of failing, so creation can fetch missing partial-clone objects from a promisor remote. The `git --no-lazy-fetch` option would reject these releases, but it exists only in Git 2.45 and later and also rejects the patched maintenance releases. The subprocess provider must permit all checkout and shared Git metadata writes.
 
 <a id="dev-note"></a>
 ### Dev Note
@@ -93,6 +93,6 @@ This package contributes no prompt text. Its consumers own the appended tool res
 <details>
 <summary>Working context for maintainers — click to expand</summary>
 
-The sandboxed Node child supplies exclusive directory creation, which the [filesystem service](../../fs/fs/src/index.ts) does not expose, and identifies whether this service created the pool. The filesystem contract permits bare providers such as [fs-local](../../fs/fs-local/src/index.ts) to ignore `sandboxPolicy` on writes; `createIfAbsent` protects a file but neither enforces permissions nor identifies who created its directory. Keeping directory allocation and ignore-file creation under the same process sandbox as Git preserves refusal of existing checkout paths and the condition for creating `.gitignore`.
+The Node child supplies exclusive directory creation, which the [filesystem service](../../fs/fs/src/index.ts) does not expose, and identifies whether this service created the pool. The filesystem contract permits bare providers such as [fs-local](../../fs/fs-local/src/index.ts); `createIfAbsent` protects a file but neither enforces permissions nor identifies who created its directory. Keeping directory allocation and ignore-file creation in the same execution world as Git preserves refusal of existing checkout paths and the condition for creating `.gitignore`.
 
 </details>

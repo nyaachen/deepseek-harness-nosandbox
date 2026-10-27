@@ -5,10 +5,10 @@
  *
  * File reads follow the composed filesystem's read access, including paths
  * outside the workspace. The selected Session header supplies the base for
- * relative paths, with the sandbox policy root as its no-cwd fallback, not a
- * read-containment restriction. Directory listings and change observations
- * remain workspace-scoped. File-kind checks and configured read caps apply to
- * every preview; this service exposes no mutations.
+ * relative paths, with the process working directory as its no-cwd fallback,
+ * not a read-containment restriction. Directory listings and change
+ * observations remain workspace-scoped. File-kind checks and configured read
+ * caps apply to every preview; this service exposes no mutations.
  *
  * A page is cut from `streamText`, which decodes and rejects non-UTF-8 as it
  * goes, so the file is read only up to the first character past the page and
@@ -24,7 +24,6 @@ import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import type {} from '@deepseek-ai/dsh-fs'
 import type { FsDirEntry, FsInfo, FsPathInfo, FsTarget } from '@deepseek-ai/dsh-fs'
-import type {} from '@deepseek-ai/dsh-sandbox-policy'
 import type {} from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-session-persistence'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
@@ -181,7 +180,7 @@ function directoryEntry(child: FsDirEntry): WorkspaceDirectoryEntry {
 
 /** Host Remote file reads and workspace directory observations over the composed filesystem. */
 export class WorkspaceFiles extends TypertRemoteService {
-  static inject = ['fs', 'sandboxPolicy', 'sessions', 'typert']
+  static inject = ['fs', 'sessions', 'typert']
 
   static Config: z<Config> = z.object({
     maxBytes: z.number().step(1).min(1).default(2 * 1024 * 1024),
@@ -193,7 +192,7 @@ export class WorkspaceFiles extends TypertRemoteService {
   private readonly feed: WorkspaceChangeFeed
 
   /**
-   * @param ctx - Host context carrying the filesystem and the sandbox policy.
+   * @param ctx - Host context carrying the filesystem.
    * @param config - deployment caps on one page or one listing.
    */
   constructor(ctx: Context, private readonly config: Config) {
@@ -215,7 +214,7 @@ export class WorkspaceFiles extends TypertRemoteService {
           if (header === undefined) return undefined
           return {
             sessionId,
-            workspaceRoot: header.cwd ?? scope.sandboxPolicy.workspaceRoot,
+            workspaceRoot: header.cwd ?? process.cwd(),
           }
         },
       })

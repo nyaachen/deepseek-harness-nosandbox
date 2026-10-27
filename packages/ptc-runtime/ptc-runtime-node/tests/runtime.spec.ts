@@ -1,35 +1,20 @@
-import { mkdtemp, mkdir, readFile, readdir, rm, symlink } from 'node:fs/promises'
+import { mkdtemp, mkdir, rm } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { createServer, type Socket } from 'node:net'
-import { delimiter, join } from 'node:path'
+import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
-import Sandbox from '@deepseek-ai/dsh-sandbox-local'
-import { SandboxUnavailableError } from '@deepseek-ai/dsh-sandbox'
-import { describe, expect, it, onTestFinished, vi } from 'vitest'
+import { describe, expect, it, onTestFinished } from 'vitest'
 import type { PtcBindingFunction, PtcBindingNamespace, PtcRunRequest } from '@deepseek-ai/dsh-ptc-runtime'
 import type { Config } from '../src/index.ts'
 import { mountRuntime } from './setup.ts'
 
-/** Probe the sandbox independently so Node-runtime launch failures cannot skip enforcement tests. */
-const sandboxUsable = await (async () => {
-  const probe = new Context()
-  try {
-    await probe.plugin(Sandbox, {})
-    await probe.sandbox.confine([process.execPath, '--version'], { mode: 'read-only', workspaceRoot: process.cwd() })
-    return true
-  } catch (error: unknown) {
-    if (error instanceof SandboxUnavailableError) return false
-    throw error
-  } finally { await probe.fiber.dispose() }
-})()
-
-async function setup(config: Config = {}, mode: 'read-only' | 'workspace-write' | 'danger-full-access' = 'danger-full-access') {
+async function setup(config: Config = {}) {
   const root = await mkdtemp(join(homedir(), '.dsh-node-runtime-test-'))
   const cwd = join(root, 'workspace')
   await mkdir(cwd)
   const ctx = new Context()
   onTestFinished(async () => { await ctx.fiber.dispose(); await rm(root, { recursive: true, force: true }) })
-  const { runtime } = await mountRuntime(ctx, config, { mode, workspaceRoot: cwd })
+  const { runtime } = await mountRuntime(ctx, config)
   const run = (request: PtcRunRequest) => runtime.run(runtime.resolve(request))
   return { ctx, runtime, root, cwd, run }
 }
@@ -45,7 +30,6 @@ describe('Node program process', () => {
     expect(result.error).toBeUndefined()
     expect(result.value).toEqual({ n: 42, cwd, env: {} })
     expect(result.logs).toEqual(['ready'])
-    expect(result.sandbox).toEqual({ mode: 'danger-full-access', denied: false })
   })
 
   it('keeps native startup paths available for nested Node creation with an empty model environment', async () => {
@@ -63,34 +47,6 @@ describe('Node program process', () => {
     // CoreFoundation initializes this entry independently when a macOS child starts.
     if (process.platform === 'darwin') nativeKeys.push('__CF_USER_TEXT_ENCODING')
     expect(value.childKeys.filter(key => !nativeKeys.includes(key.toUpperCase()))).toEqual([])
-  })
-
-  it.skipIf(process.platform !== 'win32' || !sandboxUsable)('uses the common Windows grant lock and private native temp without exposing ambient values', async () => {
-    const { run, root } = await setup({}, 'workspace-write')
-    const temp = join(root, 'node-temp')
-    const tmp = join(root, 'win32-temp')
-    await mkdir(temp)
-    await mkdir(tmp)
-    onTestFinished(() => { vi.unstubAllEnvs() })
-    vi.stubEnv('TEMP', temp)
-    vi.stubEnv('TMP', tmp)
-    vi.stubEnv('DSH_TEST_RUNTIME_SECRET', 'must-not-inherit')
-    const childCode = 'const fs=require("node:fs"); const path=require("node:path"); const temp=require("node:os").tmpdir(); const file=path.join(temp,"native-temp.txt"); fs.writeFileSync(file,"native-temp"); fs.writeFileSync("native-observation.json",JSON.stringify({file,temp,env:Object.keys(process.env)}));'
-    const result = await run({
-      program: `const {spawnSync}=await import("node:child_process"); const child=spawnSync(process.execPath,["-e",${JSON.stringify(childCode)}],{stdio:"inherit"}); if(child.status!==0) throw new Error(child.error?.message ?? "native child failed"); const native=JSON.parse((await import("node:fs")).readFileSync("native-observation.json","utf8")); return {env:Object.keys(process.env),native,observed:await tools.inspect({path:native.file})};`,
-      bindings: bindings({ inspect: async (args) => {
-        const path = (args as { path: string }).path
-        expect(path.startsWith(`${temp}\\dsh-`)).toBe(true)
-        return await readFile(path, 'utf8')
-      } }),
-    })
-    expect(result.error).toBeUndefined()
-    const value = result.value as { env: string[]; native: { env: string[]; temp: string }; observed: string }
-    expect(value.env).toEqual([])
-    expect(value.native.env).not.toContain('DSH_TEST_RUNTIME_SECRET')
-    expect(value.native.temp.startsWith(`${temp}\\dsh-`)).toBe(true)
-    expect(value.observed).toBe('native-temp')
-    expect((await readdir(join(tmp, 'dsh-acl-locks'))).some(name => name.endsWith('.lock'))).toBe(true)
   })
 
   it('returns binding values and preserves typed binding rejection', async () => {
@@ -133,12 +89,12 @@ describe('Node program process', () => {
   it('uses the default deadline and caps explicit requests', async () => {
     const { runtime } = await setup()
     expect(runtime.timeout).toEqual({ defaultMs: 120_000, maxMs: 600_000 })
-    expect(runtime.executionInstructions).toBe('The program is the body of an async TypeScript function; only erasable syntax is accepted, with no enum or namespaces. Type annotations are advisory. Top-level await and return are supported. Emit output with console.log(...) or return a lossless JSON value. Only printed values and the returned value become program output. Each call runs in a fresh Node process. Node APIs are available through await import(...). Relative paths use the supplied working directory; process.env starts empty. Direct filesystem access follows this execution\'s sandbox policy.')
+    expect(runtime.executionInstructions).toBe('The program is the body of an async TypeScript function; only erasable syntax is accepted, with no enum or namespaces. Type annotations are advisory. Top-level await and return are supported. Emit output with console.log(...) or return a lossless JSON value. Only printed values and the returned value become program output. Each call runs in a fresh Node process. Node APIs are available through await import(...). Relative paths use the supplied working directory; process.env starts empty.')
     expect(runtime.resolve({ program: '', bindings: [] }).timeoutMs).toBe(120_000)
     expect(runtime.resolve({ program: '', bindings: [], timeoutMs: 900_000 }).timeoutMs).toBe(600_000)
     expect(runtime.resolve({ program: '', bindings: [], timeoutMs: null }).timeoutMs).toBeNull()
     for (const timeoutMs of [0, -1, NaN, Infinity]) expect(() => runtime.resolve({ program: '', bindings: [], timeoutMs })).toThrow()
-    await expect(runtime.run({ program: '', bindings: [], cwd: process.cwd(), timeoutMs: 1000 })).rejects.toThrow('sandbox policy')
+    await expect(runtime.run({ program: '', bindings: [], cwd: process.cwd(), timeoutMs: 900_000 })).rejects.toThrow('run requires resolved cwd and timeout')
   })
 
   it('advertises the capped default when the deployment maximum is lower', async () => {
@@ -240,57 +196,6 @@ describe('Node program process', () => {
   ])('refuses hostile program control traffic', async (program) => {
     const { run } = await setup()
     expect((await run({ program, bindings: [] })).error?.kind).toBe('protocol')
-  })
-
-  it.skipIf(!sandboxUsable)('applies read-only confinement to direct Node filesystem writes', async () => {
-    const { run, cwd } = await setup({}, 'read-only')
-    const path = join(cwd, 'denied.txt')
-    const result = await run({ program: `await (await import('node:fs/promises')).writeFile(${JSON.stringify(path)}, 'denied')`, bindings: [] })
-    expect(result.error?.kind).toBe('exception')
-    expect(result.sandbox).toMatchObject({ mode: 'read-only', denied: true })
-    await expect(readFile(path)).rejects.toMatchObject({ code: 'ENOENT' })
-  })
-
-  it.skipIf(process.platform === 'win32' || !sandboxUsable)('starts a confining launcher found only through the execution PATH', async () => {
-    const { ctx, runtime, run, root } = await setup({}, 'read-only')
-    const confine = ctx.sandbox.confine.bind(ctx.sandbox)
-    const policy = runtime.resolve({ program: '', bindings: [] }).sandboxPolicy
-    if (policy === undefined || policy.mode === 'danger-full-access') throw new Error('expected confined policy')
-    const wrapped = await confine([process.execPath, '--version'], { ...policy, mode: policy.mode })
-    const original = wrapped.argv[0]
-    if (original === undefined) throw new Error('expected sandbox launcher')
-    const executable = await ctx.subprocess.resolveExecutable(original)
-    const alias = 'ptc-private-sandbox-launcher'
-    await symlink(executable, join(root, alias))
-    const previousPath = process.env.PATH
-    const substitute = vi.spyOn(ctx.sandbox, 'confine').mockImplementation(async (argv, selected, signal) => {
-      const result = await confine(argv, selected, signal)
-      return { ...result, argv: [alias, ...result.argv.slice(1)] }
-    })
-    try {
-      process.env.PATH = `${root}${delimiter}${previousPath ?? ''}`
-      const result = await run({ program: 'return { env: Object.keys(process.env) };', bindings: [] })
-      expect(result.error).toBeUndefined()
-      expect(result.value).toEqual({ env: [] })
-    } finally {
-      substitute.mockRestore()
-      if (previousPath === undefined) delete process.env.PATH
-      else process.env.PATH = previousPath
-    }
-  })
-
-  it.skipIf(!sandboxUsable)('permits workspace writes and denies a symlink to a sibling outside it', async () => {
-    const { run, cwd, root } = await setup({}, 'workspace-write')
-    const target = join(cwd, 'allowed.txt')
-    expect((await run({ program: `await (await import('node:fs/promises')).writeFile(${JSON.stringify(target)}, 'allowed'); return true`, bindings: [] })).value).toBe(true)
-    expect(await readFile(target, 'utf8')).toBe('allowed')
-    const outside = join(root, 'outside')
-    await mkdir(outside)
-    await symlink(outside, join(cwd, 'escape'), process.platform === 'win32' ? 'junction' : 'dir')
-    const result = await run({ program: `await (await import('node:fs/promises')).writeFile(${JSON.stringify(join(cwd, 'escape', 'denied.txt'))}, 'denied')`, bindings: [] })
-    expect(result.error?.kind).toBe('exception')
-    expect(result.sandbox).toMatchObject({ mode: 'workspace-write', denied: true })
-    await expect(readFile(join(outside, 'denied.txt'))).rejects.toMatchObject({ code: 'ENOENT' })
   })
 })
 

@@ -1,4 +1,4 @@
-/** Static child program for exclusive checkout-directory allocation inside the process sandbox. */
+/** Static child program for exclusive checkout-directory allocation. */
 
 /**
  * The child receives the configured root and destination as literal argv. Existing roots retain

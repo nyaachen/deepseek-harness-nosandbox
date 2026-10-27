@@ -27,8 +27,6 @@ import * as SpillPolicy from '@deepseek-ai/dsh-spill-policy'
 import NodeRuntime, { type Config as NodeRuntimeConfig } from '@deepseek-ai/dsh-ptc-runtime-node'
 import FileSystem from '@deepseek-ai/dsh-fs-local'
 import Subprocess from '@deepseek-ai/dsh-subprocess-local'
-import Sandbox from '@deepseek-ai/dsh-sandbox-local'
-import SandboxPolicy from '@deepseek-ai/dsh-sandbox-policy'
 import SessionProjections from '@deepseek-ai/dsh-session-projection'
 
 declare module '@deepseek-ai/dsh-llm' {
@@ -43,9 +41,7 @@ async function mountRuntime(ctx: Context, config: NodeRuntimeConfig = {}): Promi
   provideWorkingDirectoryFixture(ctx)
   if (!ctx.get('fs')) await ctx.plugin(FileSystem)
   if (!ctx.get('subprocess')) await ctx.plugin(Subprocess)
-  if (!ctx.get('sandbox')) await ctx.plugin(Sandbox, {})
   if (!ctx.get('sessionProjections')) await ctx.plugin(SessionProjections)
-  if (!ctx.get('sandboxPolicy')) await ctx.plugin(SandboxPolicy, { mode: 'danger-full-access' })
   await ctx.plugin(NodeRuntime, config)
 }
 

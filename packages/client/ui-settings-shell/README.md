@@ -35,7 +35,7 @@ The **Shell** card in the Official group opens the page. **Command timeout (ms)*
 <details>
 <summary>Implementation internals — click to expand</summary>
 
-The Host half is an empty `apply`, present only so the package holds a Loader row the client module system serves the browser half for. The browser half binds the composed shell executor entry (`bash-sandbox` off Windows, `pwsh-sandbox` on it) through `ctx.configForms.get`, keeps the staged form in `ShellCardController` over the shared `SettingsFormModel` of `ui-primitives`, and registers `ShellCard` into the Plugins page's `plugins.item` slot through `ctx.configForms.whileServed`, which registers while the Host serves either entry and withdraws when it stops. The page's copy lives in this package's `settings.shell` dictionary; the `SettingsForm` frame takes its copy as props.
+The Host half is an empty `apply`, present only so the package holds a Loader row the client module system serves the browser half for. The browser half binds the composed shell executor entry (`bash-local` off Windows, `pwsh-local` on it) through `ctx.configForms.get`, keeps the staged form in `ShellCardController` over the shared `SettingsFormModel` of `ui-primitives`, and registers `ShellCard` into the Plugins page's `plugins.item` slot through `ctx.configForms.whileServed`, which registers while the Host serves either entry and withdraws when it stops. The page's copy lives in this package's `settings.shell` dictionary; the `SettingsForm` frame takes its copy as props.
 
 </details>
 

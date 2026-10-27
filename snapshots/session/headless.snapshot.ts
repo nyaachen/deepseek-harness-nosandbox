@@ -12,7 +12,6 @@ import ts from 'typescript'
 import { SESSION_FORMAT_VERSION } from '@deepseek-ai/dsh-session'
 import { releasedV0SessionFormatCodec } from '@deepseek-ai/dsh-session-format-v0-to-v1'
 import type { SessionFormatEvent, SessionFormatMigrationContext } from '@deepseek-ai/dsh-session-format'
-import { assertWorkspaceOutsideTemp, outsideTempWorkspaceParent } from '../../scripts/snapshot-workspace-parent.ts'
 import {
   assertPersistedSessionVersion,
   assertSessionFixtureVersion,
@@ -1275,7 +1274,6 @@ describe('headless recorded-session snapshots', () => {
           label: `${scenario.name} headless snapshot`,
           tempDirPrefix: 'dsh-log-snap-',
           ...(scenario.name === 'compaction-recovery' ? await compactionWorkspaceOptions() : {}),
-          ...(scenario.manifest.workspace?.parent === 'outside-temp' ? { tempDirParent: outsideTempWorkspaceParent() } : {}),
           binScript: dshBin,
           sourceImport: 'tsx/esm',
           configPath: join(baseComposition.dir, 'cordis.yml'),
@@ -1302,9 +1300,6 @@ describe('headless recorded-session snapshots', () => {
             ...(replaying && scenario.manifest.replay?.override === true
               ? { DSH_SNAPSHOT_OVERRIDE: join(scenario.dir, 'replay.override.json') }
               : {}),
-            ...(scenario.manifest.permission === undefined
-              ? {}
-              : { DSH_PERMISSION_MODE: scenario.manifest.permission }),
             ...scenario.manifest.environment,
             ...(scenario.name === 'mcp-resources' || scenario.name === 'mcp-resources-ptc' ? {
               DSH_MCP_RESOURCES_FIXTURE: join(repoRoot, 'packages/mcp/mcp-client/tests/fixtures/resources-server.ts'),
@@ -1314,7 +1309,6 @@ describe('headless recorded-session snapshots', () => {
             ...(mcpDemo === undefined ? {} : { DSH_MCP_DEMO_URL: mcpDemo.url }),
           },
           prepare: async (cwd) => {
-            if (scenario.manifest.workspace?.parent === 'outside-temp') assertWorkspaceOutsideTemp(cwd)
             await mkdir(join(cwd, patchRoot), { recursive: true })
             patchSources.forEach((source, index) => {
               materializeProfilePatch(source, cwd, 'headless', join(cwd, patchRoot), index)

@@ -1,5 +1,5 @@
 ---
-description: "The POSIX SSH provider family: shared connection, remote filesystem, managed subprocesses and file-effect sandbox."
+description: "The POSIX SSH provider family: shared connection, remote filesystem and managed subprocesses."
 kind: "package-group"
 ---
 
@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-This family runs files, ordinary processes, terminals and sandbox enforcement on one POSIX SSH host while the Harness stays local. A shared OpenSSH connection and installed helper support the existing filesystem, subprocess and sandbox interfaces. Use it in headless or custom profiles whose consumers honor provider-owned paths.
+This family runs files, ordinary processes and terminals on one POSIX SSH host while the Harness stays local. A shared OpenSSH connection and installed helper support the existing filesystem and subprocess interfaces. Use it in headless or custom profiles whose consumers honor provider-owned paths.
 
 ## Table of Contents
 
@@ -26,7 +26,6 @@ This family runs files, ordinary processes, terminals and sandbox enforcement on
 | [`ssh-helper-runtime`](ssh-helper-runtime/README.md) | Private Node-free executable distribution | — |
 | [`fs-ssh`](fs-ssh/README.md) | Remote file identity, reads and guarded atomic mutations | `ctx.fs` |
 | [`subprocess-ssh`](subprocess-ssh/README.md) | Executable lookup, processes, control streams and terminals | `ctx.subprocess` |
-| [`sandbox-ssh`](sandbox-ssh/README.md) | Remote file-effect confinement and enforcement facts | `ctx.sandbox` |
 
 <a id="related-documentation"></a>
 ## Related documentation

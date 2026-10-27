@@ -30,12 +30,6 @@
       "path": "../terminal"
     },
     {
-      "path": "../../sandbox/sandbox"
-    },
-    {
-      "path": "../../sandbox/sandbox-policy"
-    },
-    {
       "path": "../../subprocess/subprocess"
     },
     {

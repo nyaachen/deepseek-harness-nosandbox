@@ -4,21 +4,17 @@
 import { randomUUID } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { readFile, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, expect, it } from 'vitest'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { LlmAdapter, ToolCallId } from '@deepseek-ai/dsh-llm'
 import type { GenerateOptions, LlmResolvedModelInfo, StreamChunk } from '@deepseek-ai/dsh-llm'
-import { canonicalPath, writableRoots } from '@deepseek-ai/dsh-sandbox'
 import { SESSION_FORMAT_VERSION, SessionId, type SessionEvent } from '@deepseek-ai/dsh-session'
-import { auditStartupEntries, composeEntries, loadOverlayPatches } from '@deepseek-ai/dsh-app-boot'
-// These imports carry the tools/sandboxPolicy/approval Context merges.
+import { composeEntries, loadOverlayPatches } from '@deepseek-ai/dsh-app-boot'
+// These imports carry the tools/approval Context merges.
 import { RUN_CODE_NAME } from '@deepseek-ai/dsh-tools'
-import type {} from '@deepseek-ai/dsh-sandbox-policy'
 import type {} from '@deepseek-ai/dsh-user-approval'
-import type {} from '@deepseek-ai/dsh-permission-presets'
 import type {} from '@deepseek-ai/dsh-agent-preset-registry'
 import type {} from '@deepseek-ai/dsh-commands'
 import type {} from '@deepseek-ai/dsh-system-prompt'
@@ -465,8 +461,8 @@ function assertLeanChildRecord(agent: Agent): void {
 /**
  * The catalog the shipped Web composition puts in front of the model, minus the
  * ripgrep-dependent pair below. The absences are deliberate, not incidental
- * gaps: the `cordis_*` toolset executes model-written JavaScript that no
- * sandbox row confines, `mcp_*` servers spawn outside `ctx.shell`, and `ralph`
+ * gaps: the `cordis_*` toolset executes model-written JavaScript outside
+ * `ctx.shell`, `mcp_*` servers spawn outside `ctx.shell`, and `ralph`
  * runs unsupervised rounds whose completion is a worker self-report.
  * `web_fetch` is present because public-address enforcement and one-shot
  * approval now confine its model-selected request target. The composition
@@ -608,22 +604,8 @@ it('assembles the shipped Web transport, catalog, guidance, and defaults', async
   } finally {
     await handle.dispose()
   }
-  // `workspace-write` is not "the workspace and nothing else": the shared roots
-  // helper always admits the temp directories too. Pinning it against an
-  // explicit mode keeps the claim independent of this surface's default, and
-  // keeps a future sandbox-confinement test from being run inside /tmp — where an
-  // "escape" write succeeds by design and reads as a sandbox failure.
-  expect(writableRoots(scaffold.ctx.sandboxPolicy.resolve({ mode: 'workspace-write' }))).toEqual(
-    expect.arrayContaining([canonicalPath('/tmp'), canonicalPath(tmpdir())]),
-  )
-  expect(scaffold.ctx.sandboxPolicy.defaultMode).toBe('workspace-write')
+  // Commands run unconfined, so approval is the only gate on tool effects.
   expect(scaffold.ctx.approval.config.policy).toBe('ask')
-  expect(scaffold.ctx.permissionPresets.defaultPreset).toBe('workspace-write')
-  expect(scaffold.ctx.permissionPresets.names).toEqual([
-    'read-only',
-    'workspace-write',
-    'danger-full-access',
-  ])
   const headlessRows = composeEntries([
     loadOverlayPatches('shipped headless composition', BASE_PATCH_PATH),
     loadOverlayPatches('shipped headless composition', HEADLESS_PATCH_PATH),
@@ -752,16 +734,9 @@ it('routes one browser-authored Auto request through the same model and asks the
   await remote(scaffold, 'session/selectModel', {
     request: { sessionId, provider: AUTO_PROVIDER, model: AUTO_MODEL },
   })
-  const switched = await remote<{ result: { kind: string; text?: string } }>(
-    scaffold,
-    'commands/execute',
-    { agentId: sessionId, line: '/permission auto', submittedAttachments: [] },
-  )
-  expect(switched.result).toEqual({ kind: 'success', text: 'preset auto' })
 
   const agent = ctx.agents.get(sessionId)
   if (agent === undefined) throw new Error('shipped Auto session was not published')
-  expect(ctx.permissionPresets.current(agent.session)).toBe('auto')
 
   const requestId = `shipped-auto-direct-user-${randomUUID()}`
   const settled = scaffold.whenTurnSettled()
@@ -850,11 +825,6 @@ it('reviews initially authorized, restricted, and cold-resumed child calls indep
   await remote(scaffold, 'session/selectModel', {
     request: { sessionId: parentId, provider: AUTO_PROVIDER, model: AUTO_MODEL },
   })
-  await remote(scaffold, 'commands/execute', {
-    agentId: parentId,
-    line: '/permission auto',
-    submittedAttachments: [],
-  })
   const parent = ctx.agents.get(parentId)
   if (parent === undefined) throw new Error('shipped child Auto parent was not published')
 
@@ -895,7 +865,6 @@ it('reviews initially authorized, restricted, and cold-resumed child calls indep
     const authorized = childActivations.find(agent => agent.id === authorizedId)
     if (authorized === undefined) throw new Error('authorized Auto child activation was not observed')
     expect(authorized.session.header.parentSession).toBe(parentId)
-    expect(ctx.permissionPresets.current(authorized.session)).toBe('auto')
     expect(toolOutcomes(authorized.session.snapshotEvents())).toEqual([
       { name: 'read' },
       { name: 'bash' },
@@ -949,10 +918,6 @@ it('reviews initially authorized, restricted, and cold-resumed child calls indep
     expect(continuableActivations).toHaveLength(2)
     expect(resumed.id).toBe(continuableId)
     expect(resumed.session.header.parentSession).toBe(parentId)
-    expect(ctx.permissionPresets.current(resumed.session)).toBe('auto')
-    expect(resumedEvents.filter(event => event.type === 'permission/preset')).toMatchObject([
-      { data: { preset: 'auto' } },
-    ])
     assertLeanChildRecord(resumed)
 
     expect(toolOutcomes(parent.session.snapshotEvents())).toEqual([
@@ -997,106 +962,4 @@ it('reviews initially authorized, restricted, and cold-resumed child calls indep
     stopSettlementTurns()
     stopCreated()
   }
-}, 120_000)
-
-it('rolls back a failed shipped Auto initialization before publishing or intercepting tools', async () => {
-  scaffold = await launchWebScaffold(AUTO_REVIEW_FIXTURE)
-  const ctx = scaffold.ctx
-  const autoEntry = [...ctx.loader.entries()].find(entry => entry.options.id === 'auto-review')
-  if (autoEntry === undefined) throw new Error('shipped Auto review Loader entry is missing')
-
-  await autoEntry.update({ disabled: true })
-  await ctx.loader.await()
-  expect(ctx.permissionPresets.names).not.toContain('auto')
-
-  // This unsupported same-process contribution occupies the reserved preset
-  // only to force the shipped integration's registration to roll back. It is
-  // not an Auto reviewer or a supported host composition.
-  const stopUnsupportedConflict = ctx.permissionPresets.registerAuto(() => {})
-  try {
-    // A failed optional entry settles the Loader without rejecting it and
-    // reports through the startup audit, which is where the conflict surfaces.
-    const warnings: string[] = []
-    await autoEntry.update({ disabled: false })
-    await ctx.loader.await()
-    await auditStartupEntries(ctx, 'web e2e scaffold', (line) => { warnings.push(line) })
-    expect(warnings.join('\n')).toContain('preset "auto" is already registered')
-
-    const handle = await ctx.agents.create({
-      sessionId: SessionId('shipped-auto-init-rollback'),
-      meta: { cwd: scaffold.workspaceCwd },
-      setup: agentCtx => ctx.agentPresets.mount(agentCtx).then(() => undefined),
-    })
-    try {
-      ctx.permissionPresets.set(handle.agent.session, 'auto')
-      const targetPath = join(scaffold.workspaceCwd, 'auto-init-rollback.txt')
-      // The successful write is a rollback sentinel: this unsupported
-      // contribution performs no review, so success proves the failed shipped
-      // integration left no pre-execute listener behind. It is not supported
-      // Auto execution behavior.
-      const result = await ctx.tools.execute({
-        signal: new AbortController().signal,
-        callId: ToolCallId('shipped-auto-init-rollback-write'),
-        name: 'write',
-        arguments: { file_path: targetPath, content: 'INITIALIZATION_ROLLED_BACK\n' },
-        agent: handle.agent,
-      })
-      expect(result.isError).toBe(false)
-      expect(await readFile(targetPath, 'utf8')).toBe('INITIALIZATION_ROLLED_BACK\n')
-    } finally {
-      await handle.dispose()
-    }
-  } finally {
-    await stopUnsupportedConflict()
-    await autoEntry.update({ disabled: true })
-    await ctx.loader.await()
-  }
-
-  expect(ctx.permissionPresets.names).not.toContain('auto')
-  await autoEntry.update({ disabled: false })
-  await ctx.loader.await()
-  expect(ctx.permissionPresets.names).toContain('auto')
-}, 120_000)
-
-it('withdraws Auto on shipped Loader unload and does not restore migrated live sessions', async () => {
-  scaffold = await launchWebScaffold(AUTO_REVIEW_FIXTURE)
-  const ctx = scaffold.ctx
-  const autoEntry = [...ctx.loader.entries()].find(entry => entry.options.id === 'auto-review')
-  if (autoEntry === undefined) throw new Error('shipped Auto review Loader entry is missing')
-  const handle = await ctx.agents.create({
-    sessionId: SessionId('shipped-auto-hot-plug'),
-    meta: { cwd: scaffold.workspaceCwd, agentPreset: 'minimal' },
-    setup: agentCtx => ctx.agentPresets.mount(agentCtx, 'minimal').then(() => undefined),
-  })
-  const terminals = ctx.agentPresets.serviceFor(handle.agent, 'terminals')
-  try {
-    if (terminals === undefined) throw new Error('shipped minimal preset has no terminal registry')
-    ctx.permissionPresets.set(handle.agent.session, 'danger-full-access')
-    const terminal = await terminals.spawn(handle.agent, { type: 'shell', cwd: scaffold.workspaceCwd })
-    ctx.permissionPresets.set(handle.agent.session, 'auto')
-    expect(ctx.permissionPresets.current(handle.agent.session)).toBe('auto')
-
-    await autoEntry.update({ disabled: true })
-    await ctx.loader.await()
-    expect(ctx.permissionPresets.names).not.toContain('auto')
-    expect(ctx.permissionPresets.current(handle.agent.session)).toBe('danger-full-access')
-    expect(ctx.sandboxPolicy.overrideOf(handle.agent.session)).toBe('danger-full-access')
-    expect(ctx.approval.overrideOf(handle.agent.session)).toBe('never')
-    expect(terminals.list(handle.agent)).toMatchObject([
-      { sessionId: terminal.sessionId, pid: terminal.pid, status: { kind: 'running' } },
-    ])
-    const sent = await terminals.startSend(handle.agent, terminal.sessionId, {
-      text: 'echo AUTO_TERMINAL_SURVIVED', submit: true,
-    }).done
-    expect(sent.sessionStatus).toEqual({ kind: 'running' })
-    expect(sent.viewport).toContain('AUTO_TERMINAL_SURVIVED')
-
-    await autoEntry.update({ disabled: false })
-    await ctx.loader.await()
-    expect(ctx.permissionPresets.names).toContain('auto')
-    expect(ctx.permissionPresets.current(handle.agent.session)).toBe('danger-full-access')
-  } finally {
-    await handle.dispose()
-  }
-  expect(terminals?.hasOwnerActivity(handle.agent)).toBe(false)
 }, 120_000)

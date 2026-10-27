@@ -19,8 +19,6 @@ import { prepareImages } from '@deepseek-ai/dsh-llm-deepseek/src/images.ts'
 import { serialize } from '@deepseek-ai/dsh-llm-deepseek/src/serialize.ts'
 import { createMcpToolDefinition } from '@deepseek-ai/dsh-mcp-client'
 import NodeRuntime from '@deepseek-ai/dsh-ptc-runtime-node'
-import Sandbox from '@deepseek-ai/dsh-sandbox-local'
-import SandboxPolicy from '@deepseek-ai/dsh-sandbox-policy'
 import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
 import SessionProjections from '@deepseek-ai/dsh-session-projection'
 import LocalSpillStore from '@deepseek-ai/dsh-spill-local'
@@ -179,8 +177,6 @@ describe('multimodal recovery through real providers', () => {
   it.each(['sequential', 'parallel'] as const)('keeps budgets and image identities separate across %s Node PTC calls', async (mode) => {
     const { ctx, session, execute, cost, requestImages, gates } = await setup('ptc')
     await ctx.plugin(Subprocess)
-    await ctx.plugin(Sandbox, {})
-    await ctx.plugin(SandboxPolicy, { mode: 'danger-full-access' })
     await ctx.plugin(NodeRuntime)
     if (mode === 'parallel') {
       const overlap = Promise.withResolvers<undefined>()

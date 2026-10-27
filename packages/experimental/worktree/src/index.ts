@@ -5,7 +5,6 @@ import { Context, Service } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-fs'
-import type {} from '@deepseek-ai/dsh-sandbox-policy'
 import type {} from '@deepseek-ai/dsh-working-directory'
 import { MAX_TIMER_DELAY_MS } from '@deepseek-ai/dsh-timeout'
 import { PREPARE_DIRECTORY } from './directory.ts'
@@ -23,7 +22,7 @@ export interface Config {
   namePrefix?: string
   /** Executable name or absolute execution-world path of a Git release that honors `GIT_NO_LAZY_FETCH`. */
   gitCommand?: string
-  /** Node executable used for sandboxed directory allocation. */
+  /** Node executable used for exclusive checkout-directory allocation. */
   nodeCommand?: string
   /** Deadline in milliseconds for one command. */
   timeoutMs?: number
@@ -52,9 +51,9 @@ function relativePath(value: string): boolean {
     && value.split('/').every(part => part.length > 0 && part !== '.' && part !== '..')
 }
 
-/** Creates retained Git worktrees under the mounted filesystem and sandbox providers. */
+/** Creates retained Git worktrees under the mounted filesystem and subprocess providers. */
 export class WorktreeService extends Service {
-  static inject = ['workingDirectory', 'fs', 'subprocess', 'sandbox', 'sandboxPolicy']
+  static inject = ['workingDirectory', 'fs', 'subprocess']
 
   static Config: z<Config> = z.object({
     directory: z.string().default('.agents/worktrees'),
@@ -99,7 +98,7 @@ export class WorktreeService extends Service {
    * Repository-local replacement refs still apply; baseCommit reports the resolved object name.
    * The new checkout becomes current only after Git setup succeeds. Failures may retain newly
    * allocated Git/filesystem artifacts; no branch or checkout is removed automatically.
-   * @param agent - caller whose current directory selects the source repository and file policy.
+   * @param agent - caller whose current directory selects the source repository.
    * @param request - optional new name and local revision; defaults are generated name and HEAD.
    * @param signal - cancellation of lookup, creation, and working-directory publication.
    * @returns canonical checkout path, branch name, pinned commit, and source repository root.
@@ -126,9 +125,8 @@ export class WorktreeService extends Service {
 
   private async createCheckout(agent: Agent, { branch, revision }: WorktreeSpec, signal: AbortSignal): Promise<CreatedWorktree> {
     const cwd = await this.ctx.workingDirectory.ensure(agent, signal)
-    const policy = this.ctx.sandboxPolicy.resolve({ session: agent.session })
     const run = (directory: string, args: string[], allowedExitCodes?: number[], env?: NodeJS.ProcessEnv) => runCommand(
-      this.ctx, this.config, policy, directory,
+      this.ctx, this.config, directory,
       [this.config.gitCommand, '-c', 'core.hooksPath=/dev/null', '-c', 'core.fsmonitor=false', ...args],
       signal, allowedExitCodes, env,
     )
@@ -146,7 +144,7 @@ export class WorktreeService extends Service {
     const path = this.ctx.fs.processPath(destination)
     if (await this.ctx.fs.lstat(path, undefined, signal) !== undefined) throw new Error(`worktree path already exists: ${path}`)
     try {
-      await runCommand(this.ctx, this.config, policy, repositoryRoot,
+      await runCommand(this.ctx, this.config, repositoryRoot,
         [this.config.nodeCommand, '--input-type=module', '-e', PREPARE_DIRECTORY, poolPath, path], signal)
       await run(repositoryRoot, ['--work-tree', repositoryRoot, 'worktree', 'add', '--no-checkout', '-b', branch, '--', path, baseCommit])
       const configured = await run(path, ['config', '--null', '--name-only', '--get-regexp', '^filter\\.'], [0, 1])

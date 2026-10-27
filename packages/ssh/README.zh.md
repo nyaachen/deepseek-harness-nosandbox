@@ -1,5 +1,5 @@
 ---
-description: "POSIX SSH 提供方家族：共享连接、远端文件系统、托管子进程及文件效果沙箱。"
+description: "POSIX SSH 提供方家族：共享连接、远端文件系统及托管子进程。"
 kind: "package-group"
 ---
 
@@ -9,7 +9,7 @@ kind: "package-group"
 
 ## 概述
 
-本家族将文件、普通进程、终端及沙箱执行放在同一台 POSIX SSH 主机上，Harness 保留在本地。共享 OpenSSH 连接与已安装辅助程序支持现有文件系统、子进程及沙箱接口。适用于消费方遵守提供方路径语义的 headless 或自定义配置组合。
+本家族将文件、普通进程及终端放在同一台 POSIX SSH 主机上，Harness 保留在本地。共享 OpenSSH 连接与已安装辅助程序支持现有文件系统及子进程接口。适用于消费方遵守提供方路径语义的 headless 或自定义配置组合。
 
 ## 目录
 
@@ -26,7 +26,6 @@ kind: "package-group"
 | [`ssh-helper-runtime`](ssh-helper-runtime/README.zh.md) | 无须安装 Node 的私有可执行文件发行包 | — |
 | [`fs-ssh`](fs-ssh/README.zh.md) | 远端文件身份、读取及带保护的原子修改 | `ctx.fs` |
 | [`subprocess-ssh`](subprocess-ssh/README.zh.md) | 可执行文件查找、进程、控制流及终端 | `ctx.subprocess` |
-| [`sandbox-ssh`](sandbox-ssh/README.zh.md) | 远端文件效果限制及执行信息 | `ctx.sandbox` |
 
 <a id="related-documentation"></a>
 ## 相关文档

@@ -14,7 +14,6 @@ import { computeHunkDiffs, diffsFromMeta, pathFromMeta } from './diff.ts'
 import { remediateFsError } from './error.ts'
 import { mutationResult } from './mutation-result.ts'
 import { sessionResolveOptions } from './session-cwd.ts'
-import type { FsSandboxController } from './sandbox.ts'
 
 /**
  * Validate value constraints the schema DSL can't express: only a non-blank
@@ -43,23 +42,18 @@ ${verb} file
 }
 
 /**
- * The `write` tool's validated arguments: the base parameters plus the
- * two escalation fields, advertised only under a confining `ctx.fs` (absent
- * from the schema otherwise, so the validator rejects them before `execute`).
+ * The `write` tool's validated arguments, matching its advertised parameters.
  */
 interface WriteToolArgs {
   file_path: string
   content: string
-  sandbox_permissions?: string
-  justification?: string
 }
 
 /**
  * Register the `write` tool and its scope-aware system-prompt guidance.
  * @param ctx - the plugin context; registrations are effects scoped to it, and execution uses its `fs` service.
- * @param sandbox - the shared sandbox-escalation API (advertisement, mode stamping, denial mapping).
  */
-export function applyWriteTool(ctx: Context, sandbox: FsSandboxController): void {
+export function applyWriteTool(ctx: Context): void {
   ctx.systemPrompt.section({
     name: 'tool:write',
     order: ctx.systemPrompt.getSectionOrder('TOOL_WRITE'),
@@ -80,7 +74,6 @@ export function applyWriteTool(ctx: Context, sandbox: FsSandboxController): void
           + 'Provide `file_path` before `content` in the arguments.',
       },
       content: { type: 'string', required: true, description: 'Full UTF-8 text content to write.' },
-      ...sandbox.escalationModes.length > 0 ? sandbox.schemaFields() : {},
     },
     output: {
       schema: {
@@ -111,22 +104,17 @@ export function applyWriteTool(ctx: Context, sandbox: FsSandboxController): void
     },
     async execute(args: WriteToolArgs, exec) {
       const input = parseWriteArgs(args)
-      // Resolve the per-call sandbox policy (approved mode > session override
-      // > backend default, plus the session cwd root) BEFORE anything executes;
-      // an escalating call throws its distinct text on any non-grant.
-      const sandboxPolicy = await sandbox.resolvePolicy('write', args, exec)
       const target = await ctx.fs.resolve(input.filePath, await sessionResolveOptions(ctx, exec))
       // Single-slot decision: the policy plugin produces createIfAbsent/
       // replaceIfVersion; the bare default is undefined (unconditional). No stat.
       const intent = await ctx.waterfall('fs/write-intent', target, exec, () => undefined)
       let outcome: FsWriteOutcome
       try {
-        outcome = await ctx.fs.writeText(target, input.content, intent, exec.signal, sandboxPolicy)
+        outcome = await ctx.fs.writeText(target, input.content, intent, exec.signal)
       } catch (error: unknown) {
-        // A sandbox denial becomes the shared [sandbox: …] marker (the model
-        // recognizes it from bash); guarded mutation failures receive their
-        // stable model-facing diagnostic; anything else passes through.
-        throw remediateFsError(sandbox.mapError(error, sandboxPolicy), target.displayPath)
+        // Guarded mutation failures receive their stable model-facing diagnostic;
+        // anything else passes through.
+        throw remediateFsError(error, target.displayPath)
       }
       return mutationResult(ctx, target, outcome, exec)
     },

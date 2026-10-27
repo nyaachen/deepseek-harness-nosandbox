@@ -76,7 +76,7 @@ export async function verifySshTransport(argv: string[]): Promise<void> {
     await writeFile(config, artifactComposition({ id: 'ssh', name: '@deepseek-ai/dsh-ssh', config: {
       host: 'artifact', launch: { kind: 'executable' }, helper: '/opt/dsh-helper/dsh-ssh-helper',
       helperHash: await fileDigest(join(installed, 'dsh-ssh-helper')), workspace,
-    } }, workspace))
+    } }))
     const home = join(temporary, 'client-home')
     await mkdir(home)
     const report = join(temporary, 'report.json')

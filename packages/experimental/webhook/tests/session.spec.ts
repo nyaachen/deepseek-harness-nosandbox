@@ -11,10 +11,10 @@ import {
 import { createWebhookSession } from '../src/session.ts'
 
 interface HarnessOptions {
-  failAt?: 'permission-resolve' | 'preset-resolve' | 'standing' | 'workspace' | 'agent' | 'attach' | 'permission-set' | 'title' | 'followup'
+  failAt?: 'preset-resolve' | 'standing' | 'workspace' | 'agent' | 'attach' | 'title' | 'followup'
   failDetach?: boolean
   failDispose?: boolean
-  abortAt?: 'workspace' | 'agent' | 'attach' | 'permission-continuation'
+  abortAt?: 'workspace' | 'agent' | 'attach' | 'title-continuation'
 }
 
 interface SessionHarness {
@@ -76,21 +76,6 @@ function harness(options: HarnessOptions = {}): SessionHarness {
   }
   const fake = {
     logger: { warn: vi.fn() },
-    permissionPresets: {
-      resolve(name: string) {
-        calls.push(`permission-resolve:${name}`)
-        if (options.failAt === 'permission-resolve') throw new Error('permission resolve failed')
-        return {}
-      },
-      set(_session: unknown, name: string) {
-        calls.push(`permission-set:${name}`)
-        if (options.abortAt === 'permission-continuation') queueMicrotask(() => {
-          calls.push('abort')
-          controller.abort(new Error('abort after permission setup'))
-        })
-        if (options.failAt === 'permission-set') throw new Error('permission set failed')
-      },
-    },
     agentDefaultModel: {
       currentSelection() {
         calls.push('default-model')
@@ -138,6 +123,10 @@ function harness(options: HarnessOptions = {}): SessionHarness {
     sessionTitle: {
       rename() {
         calls.push('title')
+        if (options.abortAt === 'title-continuation') queueMicrotask(() => {
+          calls.push('abort')
+          controller.abort(new Error('abort after Session title'))
+        })
         if (options.failAt === 'title') throw new Error('title failed')
         return {}
       },
@@ -156,7 +145,6 @@ function harness(options: HarnessOptions = {}): SessionHarness {
       title: 'Review PR',
       prompt: 'Review it',
       agentPreset: 'standard',
-      permissionPreset: 'read-only',
     },
   }
   active.push(result)
@@ -203,14 +191,12 @@ describe('webhook Session creation', () => {
     await create(test)
     expect(test.calls).toEqual([
       'default-model',
-      'permission-resolve:read-only',
       'preset-resolve:standard',
       'standing:standard',
       'workspace:/workspace',
       'agent-create',
       'mount:standard',
       'attach',
-      'permission-set:read-only',
       'title',
       'followup',
     ])
@@ -278,14 +264,13 @@ describe('webhook Session creation', () => {
   it.each([
     [null, /must be null or a Session request object/],
     [{}, /workspacePath/],
-    [{ workspacePath: 'relative', title: 't', prompt: 'p', agentPreset: 'a', permissionPreset: 'x' }, /must be absolute/],
-    [{ workspacePath: '/w', title: ' ', prompt: 'p', agentPreset: 'a', permissionPreset: 'x' }, /title/],
-    [{ workspacePath: '/w', title: 't', prompt: '', agentPreset: 'a', permissionPreset: 'x' }, /prompt/],
-    [{ workspacePath: '/w', title: 't', prompt: 'p', agentPreset: '', permissionPreset: 'x' }, /agentPreset/],
-    [{ workspacePath: '/w', title: 't', prompt: 'p', agentPreset: 'a', permissionPreset: '' }, /permissionPreset/],
-    [{ workspacePath: '/w', title: 't', prompt: 'p', agentPreset: 'a', permissionPreset: 'x', model: null }, /model must be an object/],
-    [{ workspacePath: '/w', title: 't', prompt: 'p', agentPreset: 'a', permissionPreset: 'x', model: {} }, /provider/],
-    [{ workspacePath: '/w', title: 't', prompt: 'p', agentPreset: 'a', permissionPreset: 'x', model: { provider: 'p', model: 'm', maxTokens: 0 } }, /maxTokens/],
+    [{ workspacePath: 'relative', title: 't', prompt: 'p', agentPreset: 'a' }, /must be absolute/],
+    [{ workspacePath: '/w', title: ' ', prompt: 'p', agentPreset: 'a' }, /title/],
+    [{ workspacePath: '/w', title: 't', prompt: '', agentPreset: 'a' }, /prompt/],
+    [{ workspacePath: '/w', title: 't', prompt: 'p', agentPreset: '' }, /agentPreset/],
+    [{ workspacePath: '/w', title: 't', prompt: 'p', agentPreset: 'a', model: null }, /model must be an object/],
+    [{ workspacePath: '/w', title: 't', prompt: 'p', agentPreset: 'a', model: {} }, /provider/],
+    [{ workspacePath: '/w', title: 't', prompt: 'p', agentPreset: 'a', model: { provider: 'p', model: 'm', maxTokens: 0 } }, /maxTokens/],
   ] as const)('rejects malformed rule result %# before side effects', async (request, message) => {
     const test = harness()
     await expect(create(test, request as never)).rejects.toThrow(message)
@@ -293,7 +278,7 @@ describe('webhook Session creation', () => {
   })
 
   it.each([
-    'permission-resolve', 'preset-resolve', 'standing', 'workspace', 'agent', 'attach',
+    'preset-resolve', 'standing', 'workspace', 'agent', 'attach',
   ] as const)('contains a %s failure before prompt admission', async (failAt) => {
     const test = harness({ failAt })
     await expect(create(test)).rejects.toThrow()
@@ -301,7 +286,7 @@ describe('webhook Session creation', () => {
     if (failAt === 'attach') expect(test.calls).toContain('dispose')
   })
 
-  it.each(['permission-set', 'title', 'followup'] as const)(
+  it.each(['title', 'followup'] as const)(
     'detaches and disposes after a %s failure',
     async (failAt) => {
       const test = harness({ failAt })
@@ -325,10 +310,10 @@ describe('webhook Session creation', () => {
     if (abortAt === 'attach') expect(test.calls).toContain('detach')
   })
 
-  it('admits the prompt synchronously after permission setup before a queued cancellation', async () => {
-    const test = harness({ abortAt: 'permission-continuation' })
+  it('admits the prompt synchronously after the title before a queued cancellation', async () => {
+    const test = harness({ abortAt: 'title-continuation' })
     await create(test)
-    expect(test.calls.indexOf('followup')).toBeGreaterThan(test.calls.indexOf('permission-set:read-only'))
+    expect(test.calls.indexOf('followup')).toBeGreaterThan(test.calls.indexOf('title'))
     expect(test.calls.indexOf('abort')).toBeGreaterThan(test.calls.indexOf('followup'))
     expect(test.calls).not.toContain('detach')
     expect(test.calls).not.toContain('dispose')

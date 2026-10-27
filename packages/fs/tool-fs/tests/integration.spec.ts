@@ -14,7 +14,6 @@ import { Context } from '@deepseek-ai/cordis'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import { PtcRuntime, type PtcRunRequest, type PtcRunResult, type PtcRunSpec } from '@deepseek-ai/dsh-ptc-runtime'
-import SandboxPolicyService from '@deepseek-ai/dsh-sandbox-policy'
 import { ToolCallId } from '@deepseek-ai/dsh-llm'
 import type { FsVersion } from '@deepseek-ai/dsh-fs'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
@@ -560,7 +559,7 @@ describe('signal, concurrency, and the fs/observed contract', () => {
 
 
 describe('current working directory', () => {
-  it('routes subsequent files to the new directory while keeping the original permission root', async () => {
+  it('routes subsequent files to the new directory', async () => {
     dir = await mkdtemp(join(tmpdir(), 'dsh-tool-fs-current-'))
     const next = join(dir, 'next')
     await mkdir(next)
@@ -571,7 +570,6 @@ describe('current working directory', () => {
       await ctx.plugin(LocalFileSystem, { cwd: dir })
       await mountAgentLoopTestDependencies(ctx, { workingDirectory: true })
       await ctx.plugin(AgentLoop, { agents: [] })
-      await ctx.plugin(SandboxPolicyService, { mode: 'workspace-write', workspaceRoot: dir })
       fiber = await ctx.plugin(ToolFs)
       const handle = await ctx.agents.create({
         sessionId: SessionId('current-directory-files'), meta: { cwd: dir },
@@ -579,7 +577,6 @@ describe('current working directory', () => {
       })
       const agent = handle.agent
       const session = agent.session
-      const policy = ctx.sandboxPolicy.resolve({ session })
       await ctx.workingDirectory.set(agent, next)
       const current = ctx.workingDirectory.get(session)
       const read = await ctx.tools.execute({
@@ -629,7 +626,6 @@ describe('current working directory', () => {
       expect(write.meta).toMatchObject({ path: join(current, 'created.txt') })
       expect(await readFile(join(next, 'created.txt'), 'utf8')).toBe('edited')
       await expect(readFile(join(dir, 'created.txt'), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
-      expect(ctx.sandboxPolicy.resolve({ session }).workspaceRoot).toBe(policy.workspaceRoot)
       expect(session.header.cwd).toBe(dir)
     } finally {
       await ctx.fiber.dispose()

@@ -204,9 +204,6 @@ function shellCall(name: string, args: Record<string, unknown>): ShellCall | nul
   if (timeoutMs !== undefined && (typeof timeoutMs !== 'number' || !Number.isFinite(timeoutMs) || timeoutMs <= 0)) return null
   if (workdir !== undefined && typeof workdir !== 'string') return null
   if (background !== undefined && typeof background !== 'boolean') return null
-  // Escalation fields stay unchecked: their validity depends on the Session's
-  // sandbox mode, which only the Host knows, and a rejected call settles as an
-  // error result on the generic body.
   if (description === undefined) {
     // Standard dsh-tool-bash and dsh-tool-pwsh schemas require `description`;
     // persistent shell providers omit it. Their parameter roots stay open, so

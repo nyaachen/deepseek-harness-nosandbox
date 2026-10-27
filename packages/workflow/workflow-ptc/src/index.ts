@@ -1,6 +1,6 @@
 /**
- * Workflow orchestration through the shared sandboxed Node PTC executor.
- * The VM supplies script helpers; the process applies the calling Session's file policy.
+ * Workflow orchestration through the shared Node PTC executor.
+ * The VM supplies script helpers; the process runs the workflow program.
  * @module @deepseek-ai/dsh-workflow-ptc
  */
 
@@ -9,7 +9,6 @@ import { availableParallelism } from 'node:os'
 import * as vm from 'node:vm'
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-ptc-runtime'
-import type {} from '@deepseek-ai/dsh-sandbox-policy'
 import type {} from '@deepseek-ai/dsh-working-directory'
 import z from '@deepseek-ai/schemastery'
 import WorkflowEngine, { WorkflowError, WorkflowRunId } from '@deepseek-ai/dsh-workflow'
@@ -101,7 +100,7 @@ function resolveMaxTotalAgents(requested: number | undefined, ceiling: number): 
  * the seam contract.
  */
 class PtcWorkflowEngine extends WorkflowEngine {
-  static inject = ['subagents', 'ptcRuntime', 'sandboxPolicy', 'workingDirectory']
+  static inject = ['subagents', 'ptcRuntime', 'workingDirectory']
 
   static Config: z<Config> = z.object({
     provider: z.string().default('spawn'),
@@ -122,7 +121,7 @@ class PtcWorkflowEngine extends WorkflowEngine {
   }
 
   /**
-   * Validate and execute a workflow script in a sandboxed Node process. Throws
+   * Validate and execute a workflow script in a managed Node process. Throws
    * {@link WorkflowError} synchronously (`META_INVALID` for a malformed meta
    * block, `SCRIPT_PARSE` for a body that does not compile) for a request
    * that cannot begin; once a run is returned, every failure resolves through
@@ -164,7 +163,6 @@ class PtcWorkflowEngine extends WorkflowEngine {
       request.parent,
       init,
       subagentProvider,
-      runCtx.sandboxPolicy.resolve({ session: request.parent.session }),
       {
         phase: (title) => { this.emitWorkflowEvent('workflow/phase', info, title) },
         log: (message) => { this.emitWorkflowEvent('workflow/log', info, message) },

@@ -60,7 +60,6 @@ export class WebhookRuntime extends Service {
     'agents',
     'agentDefaultModel',
     'agentPresets',
-    'permissionPresets',
     'sessionTitle',
     'workspaceRegistry',
   ]

@@ -247,7 +247,7 @@ describe.skipIf(process.platform === 'win32')('Web sidebar terminal', () => {
     expect(tripwire.pageErrors).toEqual([])
   })
 
-  it('starts in the current directory while earlier terminals and sandbox roots stay independent', async () => {
+  it('starts in the current directory while earlier terminals stay independent', async () => {
     onTestFailed(() => saveFailureShot(page, 'sidebar-terminal-directory'))
     const agent = scaffold.ctx.agents.list()[0]!
     const directories = agent.ctx.get('workingDirectory')
@@ -255,12 +255,6 @@ describe.skipIf(process.platform === 'win32')('Web sidebar terminal', () => {
     const original = directories.get(agent.session)
     const child = join(original, 'terminal-child')
     await mkdir(child)
-    const sandboxPolicy = agent.ctx.get('sandboxPolicy')
-    if (sandboxPolicy === undefined) throw new Error('Session sandbox policy provider is missing')
-    const policy = sandboxPolicy.resolve({ session: agent.session })
-    const sandbox = agent.ctx.get('sandbox')
-    if (sandbox === undefined) throw new Error('Session sandbox provider is missing')
-    const confine = vi.spyOn(sandbox, 'confine')
     const selected = await directories.set(agent, child)
 
     await openTerminal(page)
@@ -279,8 +273,6 @@ describe.skipIf(process.platform === 'win32')('Web sidebar terminal', () => {
     await checkDirectory('SECOND_DIRECTORY_STATUS', returned)
     expect(scaffold.ctx.terminalController.list(agent.id).map(terminal => terminal.cwd)).toEqual([selected, returned])
     expect(alive(firstProcess)).toBe(true)
-    expect(sandboxPolicy.resolve({ session: agent.session })).toEqual(policy)
-    expect(confine).not.toHaveBeenCalled()
     expect(tripwire.pageErrors).toEqual([])
   })
 
@@ -320,7 +312,7 @@ describe.skipIf(process.platform === 'win32')('Web sidebar terminal', () => {
     await command(page, "printf 'SECOND_PID:%s\\n' \"$$\"")
     await expect.poll(async () => await screen.innerText()).toMatch(/SECOND_PID:\d+/u)
     const secondPid = Number((await screen.innerText()).match(/SECOND_PID:(\d+)/u)?.[1])
-    // Shell PIDs belong to the sandbox namespace; process liveness uses Host identities.
+    // Process liveness uses Host identities, not the shell's own PID.
     const secondProcess = processIdentity(1)
     expect(secondProcess.pid).not.toBe(firstProcess.pid)
     await page.locator('[data-dockkit-tab]').filter({ hasText: 'Development' }).click()

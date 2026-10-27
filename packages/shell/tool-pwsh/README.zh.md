@@ -1,5 +1,5 @@
 ---
-description: "面向模型的 pwsh 工具，供选择、配置或排查 Windows 上一次性 PowerShell 执行、后台任务与沙箱升权的使用者与维护者阅读。"
+description: "面向模型的 pwsh 工具，供选择、配置或排查 Windows 上一次性 PowerShell 执行与后台任务的使用者与维护者阅读。"
 kind: "package-reference"
 ---
 
@@ -9,7 +9,7 @@ kind: "package-reference"
 
 ## 概述
 
-`dsh-tool-pwsh` 让 agent（智能体）通过已挂载的 shell 执行器运行 PowerShell 命令。每次调用使用全新进程；组合中有 job 注册表时，每条命令从启动那一刻起就是一个任务，因此 `run_in_background` 立即返回 id，超过超时仍在运行的前台命令返回同一个 id，输出可观测。命令使用原生 Windows 路径和 `$env:NAME` 变量，不做方言翻译。调用获得受管 `DSH_*` 环境，沙箱执行会落实 Windows 语言模式与命名管道要求。请与 `dsh-pwsh-local` 等 PowerShell 执行器及 `dsh-shell-env` 插件一起挂载。
+`dsh-tool-pwsh` 让 agent（智能体）通过已挂载的 shell 执行器运行 PowerShell 命令。每次调用使用全新进程；组合中有 job 注册表时，每条命令从启动那一刻起就是一个任务，因此 `run_in_background` 立即返回 id，超过超时仍在运行的前台命令返回同一个 id，输出可观测。命令使用原生 Windows 路径和 `$env:NAME` 变量，不做方言翻译。调用获得受管 `DSH_*` 环境，并以 harness 进程自身的权限运行。请与 `dsh-pwsh-local` 等 PowerShell 执行器及 `dsh-shell-env` 插件一起挂载。
 
 ## 目录
 
@@ -60,13 +60,9 @@ kind: "package-reference"
 
 组合中有 job 注册表时，前台命令一启动就登记到 `ctx.jobs`，调用等待该任务：命令在运行期间始终被列出、经 `job.list` 与 `job.follow` 流式观看，并可从 Web 任务列表停止。在超时内完成的命令返回普通前台结果，其任务记录随结果一起离开注册表，模型从不看到 id。超过超时仍在运行的命令继续作为它本来就是的那个任务运行，调用返回 `[still running after <timeoutMs>ms; moved to background job <id>]` 加任务交接指引，并以一次消费式读取带上目前为止的输出——`job_output` 恰好从此处接续。来自调用之外的杀停（人在界面上停止任务）会让前台结果在退出标记之前带上 `[stopped: <reason>]`，模型读到的是原因而不是命令失败；取消调用本身则杀掉任务。登记是尽力而为的：`promoteOnTimeout: false`、缺少 job 注册表，或注册表在启动时拒绝该任务（持有者的任务上限、没有控制器）都会改为在执行器的 deadline 杀下运行命令，`timeoutMs` 参数描述也只在交接语义成立时才宣传它。
 
-### Windows 特有的沙箱行为
-
-在沙箱执行器下，被拒绝的命令会报告 `[sandbox: file access denied under <mode> mode]`，并适用相同的单次升权路径：用 `sandbox_permissions` 加一句 `justification`，经用户审批后重试完全相同的命令一次。理由字段提示模型使用用户当前提问的语言。工具还会在其描述中教授两条 Windows 受限令牌约定：只读 pwsh 运行在 ConstrainedLanguage 中（`.NET` 静态调用、`Add-Type`、COM 与反射会以 "only core types" 错误失败）；两种受限模式下程序都无法打开命名管道，因此通过管道 stdio 捕获另一程序输出的命令会以 EPERM 失败——请升权该确切命令一次，或重构命令以避免捕获输出。
-
 ### 可能出什么问题
 
-没有 PowerShell 执行器的组合永远不会激活该工具，且注入的服务（`tools`、`shell`、`systemPrompt`、`shellEnv`）必须全部存在。没有任务运行时的后台调用会以 `background jobs unavailable: load @deepseek-ai/dsh-jobs and @deepseek-ai/dsh-tool-jobs` 失败；没有沙箱执行器时的 `sandbox_permissions` 会以 `sandbox_permissions is not available in this composition (no sandboxing executor to escalate)` 失败。
+没有 PowerShell 执行器的组合永远不会激活该工具，且注入的服务（`tools`、`shell`、`systemPrompt`、`shellEnv`）必须全部存在。没有任务运行时的后台调用会以 `background jobs unavailable: load @deepseek-ai/dsh-jobs and @deepseek-ai/dsh-tool-jobs` 失败。
 
 -----
 
@@ -82,16 +78,15 @@ kind: "package-reference"
 
 ### 设计理念
 
-- **`dsh-tool-bash` 的刻意孪生。** 前台与后台执行、受管环境、沙箱升权面以及标记／截断渲染都逐调用镜像 bash 工具，因此其中之一的消费方也能接受另一个的协议形状（[pwsh 工具与 bash 对齐 参考](README.zh.md)）。
+- **`dsh-tool-bash` 的刻意孪生。** 前台与后台执行、受管环境以及标记／截断渲染都逐调用镜像 bash 工具，因此其中之一的消费方也能接受另一个的协议形状（[pwsh 工具与 bash 对齐 参考](README.zh.md)）。
 - **PowerShell 方言约定。** 工具约定是 PowerShell：原生路径与 `$env:` 变量，经由 `pwsh -Command` 执行，没有中间 shell。
-- **Windows 沙箱事实写进描述。** ConstrainedLanguage 与命名管道约定是 Windows 受限令牌行为；教授它们的条件是「已挂载任意约束执行器」，之所以安全，是因为每个已发布的配对都是 win32-only。
 - **非零退出只报告、不失败。** 只有基础设施故障（spawn 错误、中止）才会作为工具错误暴露，与 bash 的故事一致。
 
 ### 源码地图
 
 | 文件 | 职责 |
 |---|---|
-| [`src/index.ts`](src/index.ts) | 插件入口：工具注册、提示词区段、参数校验、升权、请求组装 |
+| [`src/index.ts`](src/index.ts) | 插件入口：工具注册、提示词区段、参数校验、请求组装 |
 | [`src/background.ts`](src/background.ts) | 把已结算的进程映射为通用任务结果词汇，并把输出环读取渲染为进程读取 |
 | [`src/render.ts`](src/render.ts) | 模型侧结果文本：流、标记、截断通知（bash 孪生） |
 
@@ -113,7 +108,6 @@ kind: "package-reference"
 - [shell-env](../shell-env/README.zh.md)——每次调用都会收到的受管 `DSH_*` 环境。
 - [tool-jobs](../../jobs/tool-jobs/README.zh.md)——后台运行的 `job_output`、`job_list` 与 `job_kill` 控制。
 - [历史pwsh 工具与 bash 对齐 Agent Note](../../../.agents/notes/archived/feature/2026-08-02-pwsh-tool-bash-parity.md)——为什么工具镜像 bash 工具。
-- [Windows ACL 受限令牌沙箱 Agent Note](../../../.agents/notes/implemented/feature/2026-08-08-windows-acl-restricted-token-sandbox.zh.md)——语言模式与命名管道约定。
 - [生成的工具目录](../../../docs/tool-catalog.zh.md#deepseek-aidsh-tool-pwsh)——`pwsh` 参数 schema 的确切内容。
 - [生成的配置目录](../../../docs/config-catalog.zh.md#deepseek-aidsh-tool-pwsh)——每个受支持配置字段及其源声明。
 
@@ -146,7 +140,7 @@ Non-zero exits are reported as `[exit code: N]` markers; investigate failures be
 
 #### 模型看到什么
 
-模型会看到生成的 [`pwsh` schema](../../../docs/tool-catalog.zh.md#deepseek-aidsh-tool-pwsh)。其理由字段提示模型使用用户当前提问的语言。按 agent 作用域实施的工具限制可以移除该 agent 的定义。
+模型会看到生成的 [`pwsh` schema](../../../docs/tool-catalog.zh.md#deepseek-aidsh-tool-pwsh)。按 agent 作用域实施的工具限制可以移除该 agent 的定义。
 
 #### Token 影响
 
@@ -160,7 +154,7 @@ Non-zero exits are reported as `[exit code: N]` markers; investigate failures be
 
 #### 模型看到什么
 
-渲染器输出依数据而定的 stdout 尾部，再输出可选的 `[stderr]` 和 stderr 尾部。条件行精确为 `[output truncated; full output: <path-or-(unavailable)>]`、`[sandbox: file access denied under <mode> mode]` 加升权提示 `[sandbox: escalation available — …]`（仅在组合声明升权时）、`[timed out after <timeoutMs>ms]`、`[stopped: <reason>]`、`[killed by signal: <signal>]` 与 `[exit code: <exitCode>]`（仅非零退出）；空正文渲染为 `(no output)`。
+渲染器输出依数据而定的 stdout 尾部，再输出可选的 `[stderr]` 和 stderr 尾部。条件行精确为 `[output truncated; full output: <path-or-(unavailable)>]`、`[timed out after <timeoutMs>ms]`、`[stopped: <reason>]`、`[killed by signal: <signal>]` 与 `[exit code: <exitCode>]`（仅非零退出）；空正文渲染为 `(no output)`。
 
 #### Token 影响
 
@@ -188,7 +182,7 @@ Non-zero exits are reported as `[exit code: N]` markers; investigate failures be
 
 #### 模型看到什么
 
-验证与基础设施失败统一为 `Error: <message>`。本包的稳定消息包括 `invalid command: expected a non-empty string`、`invalid description: expected a non-empty string`、`invalid timeoutMs: expected a positive number, got <value>`、升权配对失败、`sandbox_permissions is not available in this composition (no sandboxing executor to escalate)`、共享升权失败（未严格加宽／无审批服务／无 agent 可路由／无审批通道／用户拒绝／已取消）、`run_in_background is disabled for this deployment (enableRunInBackground: false)`、`background jobs unavailable: load @deepseek-ai/dsh-jobs and @deepseek-ai/dsh-tool-jobs`，以及 `tool call aborted`。
+验证与基础设施失败统一为 `Error: <message>`。本包的稳定消息包括 `invalid command: expected a non-empty string`、`invalid description: expected a non-empty string`、`invalid timeoutMs: expected a positive number, got <value>`、`run_in_background is disabled for this deployment (enableRunInBackground: false)`、`background jobs unavailable: load @deepseek-ai/dsh-jobs and @deepseek-ai/dsh-tool-jobs`，以及 `tool call aborted`。
 
 #### Token 影响
 
@@ -205,7 +199,6 @@ Non-zero exits are reported as `[exit code: N]` markers; investigate failures be
 
 这些限制说明工具何时不合适或需要特别小心。它们是当前包约束，不是任务积压。
 
-- **Windows 沙箱下的语言模式与命名管道捕获**——在 [Windows ACL 沙箱](../../sandbox/sandbox-windows-acl/README.zh.md)下，只读 pwsh 以 ConstrainedLanguage 启动，因为其临时目录写入被拒绝，导致 PowerShell 的 AppLocker 探测失败并按拒绝处理：`Add-Type`、非核心 .NET 静态调用（`[System.IO.*]::`、`[math]::`）、COM 对象与反射会以 "only core types" 错误失败，且该模式无法从内部解除。workspace-write 的私有临时目录让探测完成，因此除非宿主策略另有规定，它保持 FullLanguage。两种受限模式都拒绝命名管道打开，因此受限命令内部的管道 stdio spawn 会以 EPERM 失败。工具描述把两条约定都教给模型；完整限制以后端 README 为准。
 - **没有持久 shell**——每次调用都启动全新的 `pwsh -Command`；持久 shell 对应物是 [`@deepseek-ai/dsh-tool-pwsh-persistent`](../tool-pwsh-persistent/README.zh.md)，它跨调用保持一个按所有者隔离的 pwsh 存活。
 - **PowerShell 方言约定**——模型必须编写 PowerShell（原生路径、`$env:` 变量），而不是 bash；没有方言翻译。
 

@@ -9,7 +9,7 @@ kind: "package-reference"
 
 ## 概述
 
-使用 `ctx.shell` 运行输出有界的 shell 命令，或让命令作为后台工作继续运行。同一个执行句柄支持前台结果与后台读取。配置文件可以选择本地或沙箱化的 Bash 或 PowerShell 执行方式，而无需更改调用方。执行前解析请求，以显式确定工作目录、超时与输出上限。命令退出、超时和调用方中止都会作为结果返回；只有基础设施故障才会 reject，模型可见的渲染与沙箱指引由 `bash` 和 `pwsh` 工具负责。
+使用 `ctx.shell` 运行输出有界的 shell 命令，或让命令作为后台工作继续运行。同一个执行句柄支持前台结果与后台读取。配置文件可以选择本地 Bash 或 PowerShell 执行方式，而无需更改调用方。执行前解析请求，以显式确定工作目录、超时与输出上限。命令退出、超时和调用方中止都会作为结果返回；只有基础设施故障才会 reject，模型可见的渲染与命令指引由 `bash` 和 `pwsh` 工具负责。
 
 ## 目录
 
@@ -53,7 +53,7 @@ seam 只有两种到期策略，没有任何移交协议。`'kill'` 在 deadline
 
 ### 选择并组合一个执行器
 
-seam 本身不是执行器：每个组合只挂载一个提供方，工具即可不加改动地工作。在 POSIX 上，`dsh-bash-local` 以全新的 `bash -c` 进程运行命令，`dsh-bash-sandbox` 则通过沙箱能力限制每条命令；在 Windows 上，对应实现是 `dsh-pwsh-local` 与 `dsh-pwsh-sandbox`。`bash` 与 `pwsh` 工具只在挂载沙箱执行器时公布升权字段。最小的组合只需执行器本身：
+seam 本身不是执行器：每个组合只挂载一个提供方，工具即可不加改动地工作。在 POSIX 上，`dsh-bash-local` 以全新的 `bash -c` 进程运行命令；在 Windows 上，对应实现是 `dsh-pwsh-local`。最小的组合只需执行器本身：
 
 ```yaml
 - id: bash
@@ -88,7 +88,7 @@ seam 本身不是执行器：每个组合只挂载一个提供方，工具即可
 | 文件 | 职责 |
 |---|---|
 | [`src/index.ts`](src/index.ts) | 插件入口：抽象 `ShellExecutor` 服务与共享设置命名空间 |
-| [`src/types.ts`](src/types.ts) | 请求/spec 词汇、`ShellExecution`、`ShellRunResult` 与沙箱事实 |
+| [`src/types.ts`](src/types.ts) | 请求/spec 词汇、`ShellExecution` 与 `ShellRunResult` |
 | [`src/render.ts`](src/render.ts) | `parseExitStatus`：shell 工具共享的退出状态标记约定 |
 
 ### 设置命名空间
@@ -110,7 +110,6 @@ seam 本身不是执行器：每个组合只挂载一个提供方，工具即可
 
 - [Bash 执行器子系统](../../../docs/subsystems/shell.zh.md) —— 请求/spec 词汇、结果与完整的服务约定。
 - [bash-local](../bash-local/README.zh.md) —— 默认 POSIX 执行器：全新的 `bash -c` 进程、预算与 deadline。
-- [bash-sandbox](../bash-sandbox/README.zh.md) —— 沙箱执行器：沙箱模式、拒绝与升权。
 - [tool-bash](../tool-bash/README.zh.md) —— 基于该 seam 的面向模型 `bash` 工具。
 - [能力 seam 笔记](../../../.agents/notes/implemented/architecture/2026-06-13-capability-seams.zh.md) —— 本 seam 遵循的 Service Definition / Provider / Consumer 拆分。
 
@@ -119,7 +118,7 @@ seam 本身不是执行器：每个组合只挂载一个提供方，工具即可
 <a id="model-experience"></a>
 ## 模型体验
 
-通过 `dsh-tool-bash` 间接影响；该工具会将执行器输出与沙箱事实转为指引和保留的工具结果 token。
+通过 `dsh-tool-bash` 间接影响；该工具会将执行器输出转为指引和保留的工具结果 token。
 
 #### KV Cache 影响
 

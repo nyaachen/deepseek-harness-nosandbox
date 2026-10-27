@@ -153,7 +153,6 @@ kind: "package-reference"
 - **模型重定义 `prompt` 函数会移除就绪标记**——shell 随后在静默层级而非标记快路径上结算。
 - **命令期间没有交互 stdin**——在提供方能证明前台 stdin 等待之处，读取输入的子进程会提前返回部分输出并保留会话，因此该子进程可能吞掉下一次调用的命令，直到那次调用到达 `timeoutMs` 并重置 shell。其他情况下原调用本身会运行到 `timeoutMs`，随后重置 shell。
 - **Windows 上 SIGTSTP/SIGHUP 不可用**（后端拒绝）；SIGINT 以控制台级 Ctrl-C 输入写入投递，在提示词处会取消待处理行而不是向进程发信号。
-- **在 Windows ACL 沙箱的只读模式下，pwsh 以 ConstrainedLanguage 启动**，可能拒绝引导的 `[Console]::` 编码固定与 prompt 标记。命令仍可通过可打印提示词与静默层级结算，但非 ASCII 输出可能跟随宿主代码页。
 - **BEL 结尾的 OSC 标记目前只是就绪信号**——通向模型的 BEL 事件通道仍被推迟，与当前实现保持一致。
 
 <a id="dev-note"></a>

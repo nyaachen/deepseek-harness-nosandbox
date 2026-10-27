@@ -18,7 +18,7 @@ async function main(): Promise<void> {
       kind: packaged ? 'executable' : 'node-script', signal: controller.signal,
     })
   } catch (error) {
-    process.stderr.write(`dsh-ssh-sandbox: ${error instanceof Error ? error.message : String(error)}\n`)
+    process.stderr.write(`dsh-ssh: ${error instanceof Error ? error.message : String(error)}\n`)
     process.exitCode = 127
   } finally {
     for (const signal of ['SIGTERM', 'SIGHUP', 'SIGINT'] as const) process.off(signal, stop)

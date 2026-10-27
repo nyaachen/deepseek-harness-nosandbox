@@ -9,11 +9,6 @@
 - id: llm-deepseek
   disabled: true
 
-- id: sandbox-policy
-  config:
-    mode: workspace-write
-    workspaceRoot: !!js process.cwd()
-
 - id: tool-subagent
   config:
     provider: spawn

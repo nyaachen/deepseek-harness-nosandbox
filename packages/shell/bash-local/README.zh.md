@@ -1,5 +1,5 @@
 ---
-description: "面向部署方与维护者的默认 POSIX Bash 执行器说明，用于选择、配置或排查基于 shell seam 的非隔离命令执行。"
+description: "面向部署方与维护者的默认 POSIX Bash 执行器说明，用于选择、配置或排查基于 shell seam 的命令执行。"
 kind: "package-reference"
 ---
 
@@ -9,7 +9,7 @@ kind: "package-reference"
 
 ## 概述
 
-`dsh-bash-local` 是 POSIX 上的默认 Bash 执行器：每条命令都以全新的非登录 `bash -c` 进程运行，不读取 rc 文件，因此调用之间不会残留任何 shell 状态。它会为每条命令应用已配置的预算——工作目录、超时、输出上限——对超时与取消进行分类，并在流溢出时返回有界输出与 spill 文件恢复。命令以 harness 进程自身的权限运行：本执行器不做任何隔离，需要沙箱能力时请组合 `dsh-bash-sandbox`。挂载后，面向模型的 `bash` 工具会与它对接。
+`dsh-bash-local` 是 POSIX 上的默认 Bash 执行器：每条命令都以全新的非登录 `bash -c` 进程运行，不读取 rc 文件，因此调用之间不会残留任何 shell 状态。它会为每条命令应用已配置的预算——工作目录、超时、输出上限——对超时与取消进行分类，并在流溢出时返回有界输出与 spill 文件恢复。命令以 harness 进程自身的权限运行；本执行器不施加任何策略。挂载后，面向模型的 `bash` 工具会与它对接。
 
 ## 目录
 
@@ -25,7 +25,7 @@ kind: "package-reference"
 <a id="use-this-package"></a>
 ## 使用本包
 
-当组合需要在 POSIX 上执行 Bash 命令且不需要隔离时，挂载此执行器。它注册为 `ctx.shell`，面向模型的 `bash` 工具会立即基于它工作：agent（智能体）调用工具，命令即以全新 `bash -c` 进程按下面的预算运行。
+当组合需要在 POSIX 上执行 Bash 命令时，挂载此执行器。它注册为 `ctx.shell`，面向模型的 `bash` 工具会立即基于它工作：agent（智能体）调用工具，命令即以全新 `bash -c` 进程按下面的预算运行。
 
 ### 最小配置
 
@@ -110,10 +110,9 @@ if (result.timedOut) console.log('timed out after', result.timeoutMs)
 <a id="further-exploration"></a>
 ## 进一步探索
 
-当执行器约定不够用时阅读以下页面。这些页面从 seam 讲到提供隔离的同级包及其底层机制。
+当执行器约定不够用时阅读以下页面。这些页面从 seam 讲到面向模型的工具及其底层机制。
 
 - [shell seam](../shell/README.zh.md) —— 本提供方实现的执行器约定，包括请求/spec 拆分。
-- [bash-sandbox](../bash-sandbox/README.zh.md) —— 需要沙箱能力时，应改为组合此隔离执行器。
 - [tool-bash](../tool-bash/README.zh.md) —— 基于本执行器的面向模型 `bash` 工具。
 - [Bash 执行器子系统](../../../docs/subsystems/shell.zh.md) —— 请求/spec 词汇、结果与完整的服务约定。
 - [subprocess-local](../../subprocess/subprocess-local/README.zh.md) —— 本执行器背后的 managed-range 机制。
@@ -136,7 +135,7 @@ if (result.timedOut) console.log('timed out after', result.timeoutMs)
 
 这些限制说明本执行器何时不合适。它们是当前包约束，不是路线图。
 
-- **自身不提供隔离**——命令以 harness 进程的权限运行；需要隔离的部署组合 `dsh-bash-sandbox`，每次调用的 allow/deny/ask 策略则属于工具的 `pre-execute` waterfall（瀑布式事件）。
+- **自身不施加策略**——命令以 harness 进程的权限运行；每次调用的 allow/deny/ask 策略属于工具的 `pre-execute` waterfall（瀑布式事件）。
 - **没有持久 shell 或 PTY**——每次调用都启动全新的非登录 `bash -c`；仅持久化 cwd 与交互式终端会话均继续延期，直到真实工作流需要它们。
 - **仅支持 POSIX**——`bash` 二进制已硬编码，底层服务的进程组语义也是 POSIX 的；不支持 Windows。
 - **后台提供方失败提示就是整条 stderr 流**——`SubprocessHandle.done` 可能在目标命令开始执行前或后被拒绝，而 subprocess 服务不会为从未上报结果的目标命令 缓冲任何输出，因此执行器把不声明失败阶段的 `subprocess failed before reporting an outcome: …` 作为观测到的 stderr 流提供（偏移读取方按各自偏移重读），并只折入恰好一个 `readOutput()` 增量；丢弃了该增量的消耗式读取方只能经 `observed.stderr` 恢复它。

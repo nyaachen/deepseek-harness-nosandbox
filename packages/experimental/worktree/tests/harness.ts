@@ -8,10 +8,6 @@ import AgentRegistry from '@deepseek-ai/dsh-agent'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { unsupportedInbox } from '@deepseek-ai/dsh-agent-loop-testkit'
 import LocalFileSystem from '@deepseek-ai/dsh-fs-local'
-import SandboxProvider from '@deepseek-ai/dsh-sandbox'
-import type { ConfinedArgv, SandboxMode, SandboxPolicy } from '@deepseek-ai/dsh-sandbox'
-import SandboxPolicyService from '@deepseek-ai/dsh-sandbox-policy'
-import LocalSandbox from '@deepseek-ai/dsh-sandbox-local'
 import { Session, SessionId, SESSION_FORMAT_VERSION } from '@deepseek-ai/dsh-session'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import LocalSubprocessRuntime from '@deepseek-ai/dsh-subprocess-local'
@@ -28,13 +24,6 @@ export async function git(cwd: string, ...args: string[]): Promise<string> {
     env: { ...process.env, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '', GIT_CONFIG_PARAMETERS: '', GIT_CONFIG_COUNT: '0', GIT_DIR: undefined, GIT_WORK_TREE: undefined, GIT_INDEX_FILE: undefined },
   })
   return result.stdout.trim()
-}
-
-/** Unconfined fixtures must never accidentally exercise the confined branch. */
-export class UnusedSandbox extends SandboxProvider {
-  async confine(_argv: readonly string[], _policy: SandboxPolicy): Promise<ConfinedArgv> {
-    throw new Error('unexpected confinement in a danger-full-access fixture')
-  }
 }
 
 export function testAgent(ctx: Context, cwd: string, name = 'worktree-test'): Agent {
@@ -68,7 +57,7 @@ export async function repository(parent = tmpdir()): Promise<string> {
   }
 }
 
-export async function harness(root: string, config: Config = {}, mode: SandboxMode = 'danger-full-access'): Promise<Context> {
+export async function harness(root: string, config: Config = {}): Promise<Context> {
   const ctx = new Context()
   try {
     await ctx.plugin(AgentRegistry)
@@ -76,9 +65,6 @@ export async function harness(root: string, config: Config = {}, mode: SandboxMo
     await ctx.plugin(SystemPrompt)
     await ctx.plugin(LocalFileSystem, { cwd: root })
     await ctx.plugin(LocalSubprocessRuntime)
-    if (mode === 'danger-full-access') await ctx.plugin(UnusedSandbox)
-    else await ctx.plugin(LocalSandbox)
-    await ctx.plugin(SandboxPolicyService, { mode, workspaceRoot: root })
     await ctx.plugin(WorkingDirectoryService)
     await ctx.plugin(WorktreeService, config)
     return ctx

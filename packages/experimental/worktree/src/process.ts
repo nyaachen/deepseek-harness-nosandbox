@@ -1,13 +1,12 @@
-/** Bounded, cancellable commands under the calling Session's existing file policy. */
+/** Bounded, cancellable commands. */
 
 import type { Context } from '@deepseek-ai/cordis'
-import type { SandboxExecutionPolicy } from '@deepseek-ai/dsh-sandbox'
 import type { SubprocessCollectedOutputs } from '@deepseek-ai/dsh-subprocess'
 import { deadline } from '@deepseek-ai/dsh-timeout'
 
 /** Resolved process resource limits owned by the worktree service. */
 export interface ProcessConfig {
-  /** Deadline for one command, including executable lookup and confinement. */
+  /** Deadline for one command, including executable lookup. */
   timeoutMs: number
   /** Termination grace period for each managed subprocess. */
   graceMs: number
@@ -25,9 +24,8 @@ const GIT_ENV: NodeJS.ProcessEnv = Object.fromEntries([
 
 /**
  * Run an argv without a shell and await termination of its managed process range.
- * @param ctx - subprocess and sandbox providers in the same execution world.
+ * @param ctx - subprocess provider in the same execution world.
  * @param config - complete process resource limits.
- * @param policy - unchanged calling Session policy.
  * @param cwd - canonical process working directory.
  * @param argv - executable followed by literal arguments.
  * @param signal - operation cancellation.
@@ -38,7 +36,6 @@ const GIT_ENV: NodeJS.ProcessEnv = Object.fromEntries([
 export async function runCommand(
   ctx: Context,
   config: ProcessConfig,
-  policy: SandboxExecutionPolicy,
   cwd: string,
   argv: readonly [string, ...string[]],
   signal: AbortSignal,
@@ -49,12 +46,9 @@ export async function runCommand(
   timeout.signal.throwIfAborted()
   const program = await ctx.subprocess.resolveExecutable(argv[0], undefined, timeout.signal)
   const command = [program, ...argv.slice(1)]
-  const wrapped = policy.mode === 'danger-full-access'
-    ? command
-    : (await ctx.sandbox.confine(command, { ...policy, mode: policy.mode }, timeout.signal)).argv
   timeout.signal.throwIfAborted()
   const child = ctx.subprocess.spawn({
-    argv: wrapped,
+    argv: command,
     cwd,
     env: { ...GIT_ENV, GIT_TERMINAL_PROMPT: '0', GIT_LFS_SKIP_SMUDGE: '1', GIT_NO_LAZY_FETCH: '1', ...env },
     signal: timeout.signal,

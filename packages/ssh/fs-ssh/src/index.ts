@@ -3,8 +3,6 @@ import { posix } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { FileSystem, FsError } from '@deepseek-ai/dsh-fs'
 import type { FsDirEntry, FsEditOutcome, FsEditRequest, FsErrorCode, FsInfo, FsPathInfo, FsTarget, FsVersion, FsWriteIntent, FsWriteOutcome } from '@deepseek-ai/dsh-fs'
-import type { SandboxExecutionPolicy, SandboxMode } from '@deepseek-ai/dsh-sandbox'
-import type {} from '@deepseek-ai/dsh-sandbox-policy'
 import type {} from '@deepseek-ai/dsh-ssh'
 import { RemoteOperationError } from '@deepseek-ai/dsh-ssh/protocol'
 import { editResultSchema, entriesSchema, infoSchema, pathInfoSchema, targetSchema, textStreamIdSchema, writeResultSchema } from '@deepseek-ai/dsh-ssh/schemas'
@@ -12,15 +10,13 @@ import { z } from 'zod'
 
 const errorCodes: Record<FsErrorCode, true> = {
   FS_NOT_FOUND: true, FS_NOT_DIRECTORY: true, FS_NOT_TEXT: true, FS_NOT_REGULAR_FILE: true,
-  FS_TOO_LARGE: true, FS_PERMISSION_DENIED: true, FS_SANDBOX_DENIED: true, FS_IO_ERROR: true,
+  FS_TOO_LARGE: true, FS_PERMISSION_DENIED: true, FS_IO_ERROR: true,
   FS_STALE_VERSION: true, FS_NOT_OBSERVED: true, FS_AMBIGUOUS_EDIT: true, FS_EDIT_NOT_FOUND: true, FS_ABORTED: true,
 }
 
-/** Remote filesystem paired with the SSH subprocess and sandbox providers. */
+/** Remote filesystem served by the SSH helper of the same connection. */
 export class SshFileSystem extends FileSystem {
-  static inject = ['ssh', 'sandboxPolicy']
-
-  override get sandboxMode(): SandboxMode { return this.ctx.sandboxPolicy.defaultMode }
+  static inject = ['ssh']
 
   override async resolve(path: string, opts?: { cwd?: string; signal?: AbortSignal }): Promise<FsTarget> {
     return await this.call('fs.resolve', { path, cwd: opts?.cwd }, targetSchema, opts?.signal) as FsTarget
@@ -80,18 +76,15 @@ export class SshFileSystem extends FileSystem {
   }
 
   override async writeText(
-    target: FsTarget, content: string, expected?: FsWriteIntent, signal?: AbortSignal, sandboxPolicy?: SandboxExecutionPolicy,
+    target: FsTarget, content: string, expected?: FsWriteIntent, signal?: AbortSignal,
   ): Promise<FsWriteOutcome> {
-    const policy = sandboxPolicy ?? this.ctx.sandboxPolicy.resolve()
-    return await this.call('fs.write', { target, content, expected, policy }, writeResultSchema, signal) as FsWriteOutcome
+    return await this.call('fs.write', { target, content, expected }, writeResultSchema, signal) as FsWriteOutcome
   }
 
   override async editText(
-    target: FsTarget, edit: FsEditRequest, expected?: { version: FsVersion },
-    signal?: AbortSignal, sandboxPolicy?: SandboxExecutionPolicy,
+    target: FsTarget, edit: FsEditRequest, expected?: { version: FsVersion }, signal?: AbortSignal,
   ): Promise<FsEditOutcome> {
-    const policy = sandboxPolicy ?? this.ctx.sandboxPolicy.resolve()
-    return await this.call('fs.edit', { target, edit, expected, policy }, editResultSchema, signal) as FsEditOutcome
+    return await this.call('fs.edit', { target, edit, expected }, editResultSchema, signal) as FsEditOutcome
   }
 
   private async call<T>(method: string, params: unknown, schema: z.ZodType<T>, signal?: AbortSignal): Promise<T> {

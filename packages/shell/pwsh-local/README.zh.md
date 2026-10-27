@@ -1,5 +1,5 @@
 ---
-description: "面向部署方与维护者的本地 PowerShell 执行器说明，用于选择、配置或排查基于 shell seam 的非隔离 PowerShell 命令执行。"
+description: "面向部署方与维护者的本地 PowerShell 执行器说明，用于选择、配置或排查基于 shell seam 的 PowerShell 命令执行。"
 kind: "package-reference"
 ---
 
@@ -9,7 +9,7 @@ kind: "package-reference"
 
 ## 概述
 
-`dsh-pwsh-local` 是 PowerShell 执行器：每条命令都以全新的非交互 `pwsh -Command` 进程运行，不加载 profile 文件，因此调用之间不会残留任何 shell 状态。它逐调用镜像 `dsh-bash-local` 的语义，并额外负责 PowerShell 层事项：可执行文件解析、UTF-8 输出固定与面向模型的终端环境。命令以 harness 进程自身的权限运行——本执行器不做任何隔离；需要沙箱能力时请组合 `dsh-pwsh-sandbox`。挂载后，面向模型的 `pwsh` 工具会与它对接。
+`dsh-pwsh-local` 是 PowerShell 执行器：每条命令都以全新的非交互 `pwsh -Command` 进程运行，不加载 profile 文件，因此调用之间不会残留任何 shell 状态。它逐调用镜像 `dsh-bash-local` 的语义，并额外负责 PowerShell 层事项：可执行文件解析、UTF-8 输出固定与面向模型的终端环境。命令以 harness 进程自身的权限运行——本执行器不施加任何策略。挂载后，面向模型的 `pwsh` 工具会与它对接。
 
 ## 目录
 
@@ -25,11 +25,11 @@ kind: "package-reference"
 <a id="use-this-package"></a>
 ## 使用本包
 
-当组合需要执行 PowerShell 命令——通常是在 Windows 上——且不需要隔离时，挂载此执行器。它注册为 `ctx.shell`，面向模型的 `pwsh` 工具会立即基于它工作：agent（智能体）调用工具，命令即以全新 `pwsh -Command` 进程按下面的预算运行。
+当组合需要执行 PowerShell 命令——通常是在 Windows 上——时，挂载此执行器。它注册为 `ctx.shell`，面向模型的 `pwsh` 工具会立即基于它工作：agent（智能体）调用工具，命令即以全新 `pwsh -Command` 进程按下面的预算运行。
 
 ### 何时选择
 
-它是 `dsh-bash-local` 的 Windows 对应实现：当 `pwsh` 是平台 shell 时选择它，组合即可把 POSIX 行换成 pwsh 行并保持相同的语义。执行器从显式 `pwshPath`、常见的 Windows 安装位置、PATH 条目，或作为最后手段的 Windows PowerShell 5.1 解析 `pwsh` 可执行文件。非隔离执行时它就是默认选择；需要沙箱能力时组合 `dsh-pwsh-sandbox`。
+它是 `dsh-bash-local` 的 Windows 对应实现：当 `pwsh` 是平台 shell 时选择它，组合即可把 POSIX 行换成 pwsh 行并保持相同的语义。执行器从显式 `pwshPath`、常见的 Windows 安装位置、PATH 条目，或作为最后手段的 Windows PowerShell 5.1 解析 `pwsh` 可执行文件。当 `pwsh` 是平台 shell 时，它就是默认执行器。
 
 ### 最小配置
 
@@ -116,11 +116,10 @@ if (result.timedOut) console.log('timed out after', result.timeoutMs)
 <a id="further-exploration"></a>
 ## 进一步探索
 
-当执行器约定不够用时阅读以下页面。它们从 seam 延伸到提供隔离的同类包与 PowerShell 工具。
+当执行器约定不够用时阅读以下页面。它们从 seam 延伸到 PowerShell 工具及其底层机制。
 
 - [shell seam](../shell/README.zh.md) —— 本提供方实现的执行器约定，包括请求/spec 拆分。
 - [bash-local](../bash-local/README.zh.md) —— 本执行器逐调用镜像的 POSIX 对应实现。
-- [pwsh-sandbox](../pwsh-sandbox/README.zh.md) —— 需要沙箱能力时改为组合的隔离执行器。
 - [tool-pwsh](../tool-pwsh/README.zh.md) —— 基于本执行器的面向模型 `pwsh` 工具。
 - [Bash 执行器子系统](../../../docs/subsystems/shell.zh.md) —— 请求/spec 词汇、结果与完整的服务约定。
 
@@ -142,7 +141,7 @@ if (result.timedOut) console.log('timed out after', result.timeoutMs)
 
 这些限制说明本执行器何时不合适。它们是当前包约束，不是路线图。
 
-- **自身不提供隔离**——命令以 harness 进程的权限运行；需要隔离的部署组合沙箱执行器或策略。
+- **自身不施加策略**——命令以 harness 进程的权限运行；每次调用的 allow/deny/ask 策略属于工具的 `pre-execute` waterfall（瀑布式事件）。
 - **没有持久 shell 或 PTY**——每次调用都启动全新的 `pwsh -Command`。
 - **命令字符串是 PowerShell 文本**——`-Command` 域没有 shell 引号层，但面向模型的命令由 PowerShell 自己解析，因此 PowerShell 语法错误是命令失败，而非启动失败。
 - **后台提供方失败提示就是整条 stderr 流**——`SubprocessHandle.done` 可能在目标命令开始执行前或后被拒绝，而 subprocess 服务不会为从未上报结果的目标命令 缓冲任何输出，因此执行器把不声明失败阶段的 `subprocess failed before reporting an outcome: …` 作为观测到的 stderr 流提供（偏移读取方按各自偏移重读），并只折入恰好一个 `readOutput()` 增量；丢弃了该增量的消耗式读取方只能经 `observed.stderr` 恢复它。

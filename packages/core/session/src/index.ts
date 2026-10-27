@@ -23,9 +23,11 @@ import { ToolHistoryProjection } from './tool-history.ts'
 import type { ToolHistory } from '@deepseek-ai/dsh-llm'
 
 import { buildForkSeed } from './fork.ts'
+import type {} from './retired-events.ts'
 
 export { buildForkSeed } from './fork.ts'
 export * from './types.ts'
+export type { RetiredSandboxMode } from './retired-events.ts'
 export { SessionPreparation } from './preparation.ts'
 export type { SessionPreparationOptions } from './preparation.ts'
 export type { AssistantMessage, DeveloperMessage, SystemMessage, ToolResultMessage, UserMessage } from '@deepseek-ai/dsh-llm'

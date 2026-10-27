@@ -68,7 +68,7 @@ defineAcpSnapshotSuite({
 })
 ```
 
-每个已记录 Session 目录携带封闭的 `snapshot.yml` manifest，以及规范 parent 与连续 child 角色。parent 文件名是 `session[.vN].jsonl`；child 是 `session.<ordinal>[.vN].jsonl`；v0 省略 `.v0`，正版本使用小写 `.vN`，且每个文件名与其 header 一致。一个角色可以保留旧 generation，但 harness 会选择数值最高的一项。拥有 fixture 的 manifest 可以声明 `sessionFormat.version` 与一个或多个封闭 `coverage` 名称，把该历史 generation 保留为显式迁移 fixture。未声明时，record 与 refresh 写入当前 generation；replay 按[语料策略](../../../snapshots/AGENTS.md)对每个 parent/child 角色独立接受保留的 V3 基线或当前 generation。显式声明 `sessionFormat.version` 时，每个选定角色都必须匹配该版本。manifest 还会指名场景、随附 profile、组合／header 类别、录制来源，以及已完成 Session 无法重建的 replay、平台、权限、环境、workspace 或输入事实。存储保护检查每个选定 parent 与 child 角色的工具结果和可移植路径。提示词／schema 擦除、消息身份及提示词先于请求的顺序检查适用于当前 generation；保留的前代维持其历史表示。适配器注册预期输出、Session 日志与可选 `workspace.expected/` 比较；保护会拒绝遗留目录、缺失角色、非规范名称、绝对路径、格式错误的 manifest 与平台专用分隔符。
+每个已记录 Session 目录携带封闭的 `snapshot.yml` manifest，以及规范 parent 与连续 child 角色。parent 文件名是 `session[.vN].jsonl`；child 是 `session.<ordinal>[.vN].jsonl`；v0 省略 `.v0`，正版本使用小写 `.vN`，且每个文件名与其 header 一致。一个角色可以保留旧 generation，但 harness 会选择数值最高的一项。拥有 fixture 的 manifest 可以声明 `sessionFormat.version` 与一个或多个封闭 `coverage` 名称，把该历史 generation 保留为显式迁移 fixture。未声明时，record 与 refresh 写入当前 generation；replay 按[语料策略](../../../snapshots/AGENTS.md)对每个 parent/child 角色独立接受保留的 V3 基线或当前 generation。显式声明 `sessionFormat.version` 时，每个选定角色都必须匹配该版本。manifest 还会指名场景、随附 profile、组合／header 类别、录制来源，以及已完成 Session 无法重建的 replay、平台、环境、workspace 或输入事实。存储保护检查每个选定 parent 与 child 角色的工具结果和可移植路径。提示词／schema 擦除、消息身份及提示词先于请求的顺序检查适用于当前 generation；保留的前代维持其历史表示。适配器注册预期输出、Session 日志与可选 `workspace.expected/` 比较；保护会拒绝遗留目录、缺失角色、非规范名称、绝对路径、格式错误的 manifest 与平台专用分隔符。
 
 `normalizeSessionSnapshot` 在规范化路径并擦除系统提示文本与工具 schema 后，会保留完整 Session header 与事件 payload，但从已提交 fixture 中省略顶层 `seq`/`time` envelope；它还会规范化嵌入式 stream clock 与历史 packed-row 的 `seq0`/`time0` envelope 与 catalog child 创建时钟。事件顺序与来源事件引用的顺序保持不变。录制与刷新会将顶层 `sourceEventSeqs` 以展开数组的形式写入 fixture。Replay 只在内存中合成顶层 envelope，而运行时持久化仍写入完整日志。多 Session 比较会先通过严格的构建期静态 Session 格式目录校验预期日志与收集日志，再进行身份脱敏与规范化；来源文件名不能改变格式校验。保留的历史 replay 输入不是原生当前格式 writer 输出的比较基准：结构迁移保留请求含义，但可以产生不同的事件布局。归一化保留意外的 request-header 字段（包括 `system`），使回归保持可见。无版本的协议适配器单元测试 fixture 不属于已发布 Session 格式语料。[当前写入器格式](../../../docs/session-format-status.zh.md)的 fixture 每个事件占一行；保留的 v0/v1 fixture 可以使用规范 packed row。[临时仓库迁移器](../../../scripts/migrate-packed-session-fixtures.ts)（`pnpm run migrate:packed-session-fixtures`）会改写更旧的历史布局，由其[移除提案](../../../.agents/notes/proposed/process/2026-07-26-remove-packed-session-fixture-migrator.zh.md)负责删除该迁移器。
 
@@ -88,7 +88,7 @@ Headless/ACP 与 SDK 适配器在规范化之前，将原始目录中的子创�
 
 ### 平台与组合变体
 
-需要非 Windows 主机的场景声明 `posixOnly`，在 Windows 上跳过运行测试，但 fixture 保护仍在所有平台覆盖其已提交文件；组合需要可用 `pwsh` 的场景声明 `pwshOnly`。当临时目录授权自身待测时，`workspaceParent` 将生成子级 cwd 移出平台临时区域；场景签入的 `workspace/` 会先复制到该子级，随后 `prepareWorkspace` 在 agent 启动前针对生成 cwd 运行。默认生成的 workspace 在会话 fixture 中存储为 `{{cwd}}`，使平台临时根目录与随机 basename 不影响录制。headless manifest 在测试 Session workspace 授权本身时使用 `workspace.parent: outside-temp`。适配器在父目录可写且位于系统临时授权之外时，于平台临时根目录旁分配目录，否则使用 home，并拒绝已被自动临时写授权覆盖的生成 cwd。
+需要非 Windows 主机的场景声明 `posixOnly`，在 Windows 上跳过运行测试，但 fixture 保护仍在所有平台覆盖其已提交文件；组合需要可用 `pwsh` 的场景声明 `pwshOnly`。`workspaceParent` 将生成子级 cwd 移出平台临时区域；场景签入的 `workspace/` 会先复制到该子级，随后 `prepareWorkspace` 在 agent 启动前针对生成 cwd 运行。默认生成的 workspace 在会话 fixture 中存储为 `{{cwd}}`，使平台临时根目录与随机 basename 不影响录制。
 
 ### 可能出什么问题
 

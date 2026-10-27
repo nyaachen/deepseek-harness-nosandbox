@@ -9,9 +9,6 @@ import z from '@deepseek-ai/schemastery'
 import { FsError } from '@deepseek-ai/dsh-fs'
 import type { FsInfo, FsTarget, FsWriteIntent } from '@deepseek-ai/dsh-fs'
 import { truncateWithoutSplittingSurrogatePair } from '@deepseek-ai/dsh-output-retention'
-import { sandboxDenialMarker } from '@deepseek-ai/dsh-sandbox'
-import type { SandboxExecutionPolicy } from '@deepseek-ai/dsh-sandbox'
-import type { SandboxPolicyService } from '@deepseek-ai/dsh-sandbox-policy'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { ToolCallView, ToolRunContext } from '@deepseek-ai/dsh-tools'
 
@@ -62,29 +59,6 @@ function lineNumbersAt(content: string, offsets: readonly number[]): number[] {
     }
     return line
   })
-}
-
-class MutationPolicy {
-  private readonly policy: SandboxPolicyService | undefined
-
-  constructor(ctx: Context) {
-    this.policy = ctx.fs.sandboxMode === undefined ? undefined : ctx.get('sandboxPolicy')
-    if (ctx.fs.sandboxMode !== undefined && this.policy === undefined) {
-      throw new Error('tool-str-replace-editor: the mounted filesystem confines but ctx.sandboxPolicy is missing')
-    }
-  }
-
-  resolve(exec: ToolRunContext): SandboxExecutionPolicy | undefined {
-    return this.policy?.resolve({
-      ...exec.agent === undefined ? {} : { session: exec.agent.session },
-    })
-  }
-
-  mapError(error: unknown, policy: SandboxExecutionPolicy | undefined): unknown {
-    if (!(error instanceof FsError) || error.code !== 'FS_SANDBOX_DENIED') return error
-    const mode = (policy as SandboxExecutionPolicy).mode
-    return new FsError(sandboxDenialMarker(mode), 'FS_SANDBOX_DENIED', { cause: error })
-  }
 }
 
 async function resolveTarget(
@@ -240,13 +214,11 @@ async function viewPath(
 
 async function createFile(
   ctx: Context,
-  policy: MutationPolicy,
   path: string,
   fileText: string | undefined,
   exec: ToolRunContext,
 ): Promise<string> {
   const content = requiredForCommand(fileText, 'file_text', 'create')
-  const sandboxPolicy = policy.resolve(exec)
   const target = await resolveTarget(ctx, path, exec.signal)
   if (await ctx.fs.stat(target, exec.signal) !== undefined) {
     throw new Error(`File already exists at: ${target.displayPath}. Cannot overwrite files using command \`create\`.`)
@@ -257,25 +229,13 @@ async function createFile(
     exec,
     () => ({ kind: 'createIfAbsent' } as const),
   )
-  let outcome
-  try {
-    outcome = await ctx.fs.writeText(
-      target,
-      content,
-      intent,
-      exec.signal,
-      sandboxPolicy,
-    )
-  } catch (error: unknown) {
-    throw policy.mapError(error, sandboxPolicy)
-  }
+  const outcome = await ctx.fs.writeText(target, content, intent, exec.signal)
   ctx.emit('fs/observed', target, { kind: 'present', version: outcome.version }, exec)
   return `New file created successfully at: ${target.displayPath}`
 }
 
 async function replaceInFile(
   ctx: Context,
-  policy: MutationPolicy,
   path: string,
   oldStr: string | undefined,
   newStr: string | null | undefined,
@@ -284,7 +244,6 @@ async function replaceInFile(
   if (newStr === null) {
     throw new Error('Parameter `new_str` must be omitted or contain a string for command: str_replace')
   }
-  const sandboxPolicy = policy.resolve(exec)
   const target = await resolveTarget(ctx, path, exec.signal)
   const intent = await ctx.waterfall('fs/edit-intent', target, exec, () => undefined)
   const oldValue = requiredForCommand(oldStr, 'old_str', 'str_replace', false)
@@ -309,27 +268,20 @@ async function replaceInFile(
       'FS_AMBIGUOUS_EDIT',
     )
   }
-  let outcome
-  try {
-    outcome = await ctx.fs.writeText(
-      target,
-      before.slice(0, offset) + newValue + before.slice(offset + oldValue.length),
-      intent === undefined
-        ? { kind: 'replaceIfVersion', version: info.version }
-        : { kind: 'replaceIfVersion', version: intent.version },
-      exec.signal,
-      sandboxPolicy,
-    )
-  } catch (error: unknown) {
-    throw policy.mapError(error, sandboxPolicy)
-  }
+  const outcome = await ctx.fs.writeText(
+    target,
+    before.slice(0, offset) + newValue + before.slice(offset + oldValue.length),
+    intent === undefined
+      ? { kind: 'replaceIfVersion', version: info.version }
+      : { kind: 'replaceIfVersion', version: intent.version },
+    exec.signal,
+  )
   ctx.emit('fs/observed', target, { kind: 'present', version: outcome.version }, exec)
   return `The file ${target.displayPath} has been edited successfully.`
 }
 
 async function insertInFile(
   ctx: Context,
-  policy: MutationPolicy,
   path: string,
   insertLine: number | undefined,
   newStr: string | undefined,
@@ -337,7 +289,6 @@ async function insertInFile(
 ): Promise<string> {
   if (insertLine === undefined) throw new Error('Parameter `insert_line` is required for command: insert')
   const value = requiredForCommand(newStr, 'new_str', 'insert')
-  const sandboxPolicy = policy.resolve(exec)
   const target = await resolveTarget(ctx, path, exec.signal)
   const intent = await ctx.waterfall('fs/edit-intent', target, exec, () => undefined)
   const info = await statExisting(ctx, target, 'insert', exec)
@@ -359,12 +310,7 @@ async function insertInFile(
   const expected: FsWriteIntent = intent === undefined
     ? { kind: 'replaceIfVersion', version: info.version }
     : { kind: 'replaceIfVersion', version: intent.version }
-  let outcome
-  try {
-    outcome = await ctx.fs.writeText(target, after, expected, exec.signal, sandboxPolicy)
-  } catch (error: unknown) {
-    throw policy.mapError(error, sandboxPolicy)
-  }
+  const outcome = await ctx.fs.writeText(target, after, expected, exec.signal)
   ctx.emit('fs/observed', target, { kind: 'present', version: outcome.version }, exec)
   return `The file ${target.displayPath} has been edited successfully.`
 }
@@ -425,7 +371,6 @@ function presentEditorCall(args: {
 
 /** Register the model-facing `str_replace_editor` tool. */
 function registerStrReplaceEditor(ctx: Context, config: ResolvedConfig): void {
-  const policy = new MutationPolicy(ctx)
   ctx.tools.register(defineTool({
     name: 'str_replace_editor',
     description: config.description,
@@ -474,11 +419,10 @@ function registerStrReplaceEditor(ctx: Context, config: ResolvedConfig): void {
         case 'view':
           return viewPath(ctx, args.path, args.view_range ?? undefined, config.maxOutputChars, exec)
         case 'create':
-          return createFile(ctx, policy, args.path, args.file_text ?? undefined, exec)
+          return createFile(ctx, args.path, args.file_text ?? undefined, exec)
         case 'str_replace':
           return replaceInFile(
             ctx,
-            policy,
             args.path,
             args.old_str ?? undefined,
             args.new_str,
@@ -487,7 +431,6 @@ function registerStrReplaceEditor(ctx: Context, config: ResolvedConfig): void {
         case 'insert':
           return insertInFile(
             ctx,
-            policy,
             args.path,
             args.insert_line ?? undefined,
             args.new_str ?? undefined,

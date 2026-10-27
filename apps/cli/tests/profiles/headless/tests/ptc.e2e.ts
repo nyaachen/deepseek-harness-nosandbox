@@ -19,8 +19,6 @@ import LocalSubprocessRuntime from '@deepseek-ai/dsh-subprocess-local'
 import * as ToolBash from '@deepseek-ai/dsh-tool-bash'
 import * as LlmDeepSeek from '@deepseek-ai/dsh-llm-deepseek-api-key'
 import NodeRuntime from '@deepseek-ai/dsh-ptc-runtime-node'
-import Sandbox from '@deepseek-ai/dsh-sandbox-local'
-import SandboxPolicy from '@deepseek-ai/dsh-sandbox-policy'
 import LocalFileSystem from '@deepseek-ai/dsh-fs-local'
 import * as ToolFs from '@deepseek-ai/dsh-tool-fs'
 import * as AgentInstructions from '@deepseek-ai/dsh-agent-instructions'
@@ -120,9 +118,7 @@ async function mountRuntime(harness: Context): Promise<void> {
   if (!harness.get('sessions')) await harness.plugin(SessionStore)
   if (!harness.get('fs')) await harness.plugin(LocalFileSystem)
   if (!harness.get('subprocess')) await harness.plugin(LocalSubprocessRuntime)
-  if (!harness.get('sandbox')) await harness.plugin(Sandbox, {})
   if (!harness.get('sessionProjections')) await harness.plugin(SessionProjectionRegistry)
-  if (!harness.get('sandboxPolicy')) await harness.plugin(SandboxPolicy, { mode: 'danger-full-access' })
   await harness.plugin(NodeRuntime, {})
 }
 

@@ -2,9 +2,7 @@
 import { assertNever } from '@deepseek-ai/dsh-util-values'
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from './index.ts'
-import type {} from '@deepseek-ai/dsh-sandbox-policy'
 import type {} from '@deepseek-ai/dsh-user-approval'
-import { approveEscalation } from '@deepseek-ai/dsh-sandbox'
 import type { ChangeResult, ManagementError, PluginEntryId, PluginInstallFailureKind, RestartReason } from './types.ts'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import { getDshRuntimeVersion } from '@deepseek-ai/dsh-app-boot'
@@ -76,7 +74,7 @@ function withNextStep(result: ChangeResult): ChangeResult & { nextStep?: string 
 }
 
 /** Required services for the management tool. */
-export const inject = ['tools', 'pluginManager', 'sandboxPolicy']
+export const inject = ['tools', 'pluginManager']
 
 /** Register one management tool for discovery and the four persistent actions.
  * @param ctx Agent-scoped tool registration context.
@@ -84,7 +82,7 @@ export const inject = ['tools', 'pluginManager', 'sandboxPolicy']
 export function apply(ctx: Context): void {
   ctx.tools.register(defineTool({
     name: 'plugin_manager',
-    description: 'List plugins or bundles in the current profile, enable or disable them, install a bundle, or remove an installed bundle. Every action requires danger-full-access permission or approval for this call. Approval does not change the session permission mode. Changes affect every session in this profile. List first to obtain exact identifiers. Package installation can execute allowed build scripts. Live profiles apply changes immediately, including upgrades of installed packages; a change result that is not applied carries nextStep, which says what to do or tell the user. Unmet DSH version requirements (engines.dsh, else DSH peer dependencies) block installation and activation. Version exemptions risk crashes and data loss: warn the user and obtain explicit permission for the exact plugin and runtime versions before granting one.',
+    description: 'List plugins or bundles in the current profile, enable or disable them, install a bundle, or remove an installed bundle. Every action asks the user to approve that call. Changes affect every session in this profile. List first to obtain exact identifiers. Package installation can execute allowed build scripts. Live profiles apply changes immediately, including upgrades of installed packages; a change result that is not applied carries nextStep, which says what to do or tell the user. Unmet DSH version requirements (engines.dsh, else DSH peer dependencies) block installation and activation. Version exemptions risk crashes and data loss: warn the user and obtain explicit permission for the exact plugin and runtime versions before granting one.',
     parameters: {
       action: { type: 'string', required: true, enum: ['list_plugins', 'list_bundles', 'set_plugin', 'set_bundle', 'install_bundle', 'remove_bundle', 'list_version_exemptions', 'set_version_exemption'], description: 'Management operation.' },
       target: { type: 'string', description: 'Plugin entry id, bundle package name, or installation spec, according to action. For an Official catalog entry, pass list_bundles installTarget.spec to install_bundle.' },
@@ -101,12 +99,33 @@ export function apply(ctx: Context): void {
       render: (_args, value) => [{ type: 'text', text: value }],
     },
     async execute(args, exec) {
-      const policy = ctx.sandboxPolicy.resolve(exec.agent === undefined ? {} : { session: exec.agent.session })
-      await approveEscalation({
-        requestedMode: 'danger-full-access', effectiveMode: policy.mode, subject: 'plugin management operation',
-        justification: `plugin_manager ${JSON.stringify(args)}. Profile changes persist across sessions; installed Host code runs outside the workspace sandbox.`,
-      }, { approver: ctx.get('approval'), agent: exec.agent, callId: exec.callId,
-        toolName: 'plugin_manager', signal: exec.signal })
+      const approval = ctx.get('approval')
+      if (approval === undefined) {
+        throw new Error('plugin management operations require approval, but no approval service is composed')
+      }
+      if (exec.agent === undefined) {
+        throw new Error('plugin management operations require approval, but the call has no agent to route it through')
+      }
+      const details = `plugin_manager ${JSON.stringify(args)}. Profile changes persist across sessions and installed Host code runs with this user's process permissions.`
+      const outcome = await approval.request({
+        agent: exec.agent,
+        toolName: 'plugin_manager',
+        callId: exec.callId,
+        reason: `run a plugin management operation: ${details}`,
+        displayReason: {
+          en: `Allow this plugin management operation? ${details}`,
+          zh: `允许本次插件管理操作吗？${details}`,
+        },
+        signal: exec.signal,
+      })
+      switch (outcome) {
+        case 'allowed-once': break
+        case 'rejected': throw new Error('the user rejected this plugin management operation')
+        case 'cancelled': throw new Error('approval for this plugin management operation was cancelled')
+        case 'unavailable': throw new Error('plugin management operations require approval, but no approval channel is available')
+        /* v8 ignore next -- ApprovalOutcome is a closed union */
+        default: return assertNever(outcome)
+      }
       exec.signal.throwIfAborted()
       const manager = ctx.pluginManager
       switch (args.action) {

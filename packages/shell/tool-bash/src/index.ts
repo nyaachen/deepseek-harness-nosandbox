@@ -6,8 +6,8 @@
  * point it returns the same id. Without a registry the tool is foreground-only
  * and the executor's deadline kills the command.
  *
- * TODO(permissions): deployment policy belongs in `tools/pre-execute` and
- * sandboxing executors; see docs/architecture.md § Where new behavior goes.
+ * TODO(permissions): deployment policy belongs in `tools/pre-execute`;
+ * see docs/architecture.md § Where new behavior goes.
  * @module @deepseek-ai/dsh-tool-bash
  */
 
@@ -20,11 +20,7 @@ import { defineTool, TOOL_ABORTED } from '@deepseek-ai/dsh-tools'
 import type { GenericCallView, TerminalCallView, ToolDefinition, ToolExecution, ToolResult, ToolResultView } from '@deepseek-ai/dsh-tools'
 import { HarnessError } from '@deepseek-ai/dsh-llm'
 import type { JobId, JobRegistry, JobView } from '@deepseek-ai/dsh-jobs'
-import type {} from '@deepseek-ai/dsh-user-approval'
 import type {} from '@deepseek-ai/dsh-shell-env'
-import type { SandboxExecutionPolicy, SandboxMode } from '@deepseek-ai/dsh-sandbox'
-import { ESCALATION_TARGETS, approveEscalation, sandboxPermissionsDescription, validateEscalationArgs } from '@deepseek-ai/dsh-sandbox'
-import type { SandboxPolicyService } from '@deepseek-ai/dsh-sandbox-policy'
 import { DSH_ENV_PREFIX } from '@deepseek-ai/dsh-shell'
 import type { ShellExecRequest, ShellExecSpec, ShellExecution, ShellRunResult } from '@deepseek-ai/dsh-shell'
 import { processJob, processOutcome, processSources, ringDelta } from './background.ts'
@@ -65,12 +61,9 @@ interface BashToolArgs {
   timeoutMs?: number
   workdir?: string
   run_in_background?: boolean
-  sandbox_permissions?: string
-  /** Optional for an omitted or repeated effective mode; widening requires a non-empty reason. */
-  justification?: string
 }
 
-function validateBashArgs(args: BashToolArgs, effectiveMode: SandboxMode | undefined): void {
+function validateBashArgs(args: BashToolArgs): void {
   if (args.command.trim().length === 0) {
     throw new Error('invalid command: expected a non-empty string')
   }
@@ -80,11 +73,6 @@ function validateBashArgs(args: BashToolArgs, effectiveMode: SandboxMode | undef
   if (args.timeoutMs !== undefined && (!Number.isFinite(args.timeoutMs) || args.timeoutMs <= 0)) {
     throw new Error(`invalid timeoutMs: expected a positive number, got ${JSON.stringify(args.timeoutMs)}`)
   }
-  if (args.sandbox_permissions !== undefined && args.sandbox_permissions === effectiveMode) return
-  const justification = args.sandbox_permissions === undefined && args.justification?.trim() === ''
-    ? undefined
-    : args.justification
-  validateEscalationArgs(args.sandbox_permissions, justification)
 }
 
 function bashDescription(): string {
@@ -95,7 +83,7 @@ function bashDescription(): string {
     + 'Provide `description` before `command` in the arguments. '
     + 'Before any delete or move, verify that the resolved absolute target path is the intended one; never run it against a computed path you have not checked. '
     + 'An unset variable expands to an empty string, so guard variables in such paths with `${VAR:?}`. '
-    + 'Commands may run under a file sandbox; a blocked file operation is reported as `[sandbox: file access denied under <mode> mode]`, a policy denial: do not retry another way.'
+    + 'Commands run with your own file access; nothing is filtered or confined.'
 }
 
 /**
@@ -167,14 +155,6 @@ function canonicalBashResult(result: ShellRunResult, cwd: string) {
     timeoutMs: result.timeoutMs,
     stdout: output(result.stdout),
     stderr: output(result.stderr),
-    ...result.sandbox !== undefined ? {
-      sandbox: {
-        mode: result.sandbox.mode,
-        denied: result.sandbox.denied,
-        ...result.sandbox.enforcement !== undefined ? { enforcement: result.sandbox.enforcement } : {},
-        ...result.sandbox.runnerFailed !== undefined ? { runnerFailed: result.sandbox.runnerFailed } : {},
-      },
-    } : {},
   }
 }
 
@@ -204,48 +184,6 @@ export function apply(ctx: Context, config: Config = {}): void {
   // Keeping a timed-out command needs the whole background surface: the job
   // tools to collect and stop it, and the registry itself at execution time.
   const promoteOnTimeout = (config.promoteOnTimeout ?? true) && backgroundEnabled
-  const defaultMode = ctx.shell.sandboxMode
-  const escalationModes: readonly SandboxMode[] = defaultMode === undefined ? [] : ESCALATION_TARGETS
-  const sandboxPolicy: SandboxPolicyService | undefined = defaultMode === undefined ? undefined : ctx.get('sandboxPolicy')
-  if (defaultMode !== undefined && sandboxPolicy === undefined) {
-    throw new Error('tool-bash: the mounted bash executor confines but ctx.sandboxPolicy is missing')
-  }
-  /** Resolve the complete standing policy for this call when a confining executor is mounted. */
-  const resolveSandboxPolicy = (exec: ToolExecution): SandboxExecutionPolicy | undefined =>
-    sandboxPolicy?.resolve(exec.agent === undefined ? {} : { session: exec.agent.session })
-
-  /**
-   * Resolve a sandbox-escalation request through `ctx.approval` BEFORE
-   * anything executes, delegating the shared fail-closed sequence (strict
-   * widening, channel resolution, outcome mapping) to
-   * {@link approveEscalation}. This tool contributes only the composition
-   * guard (the fields are unadvertised without a sandboxing executor, yet
-   * schema validation checks advertised keys only, so an unadvertised
-   * `sandbox_permissions` still reaches execute) and the approval
-   * ingredients. The shared policy resolver is required whenever the executor
-   * advertises confinement, so a split composition fails at tool-plugin load.
-   */
-  const approveBashEscalation = (
-    mode: string,
-    justification: string,
-    exec: ToolExecution,
-    standingPolicy: SandboxExecutionPolicy | undefined,
-  ): Promise<SandboxMode> => {
-    if (escalationModes.length === 0) {
-      throw new Error('sandbox_permissions is not available in this composition (no sandboxing executor to escalate)')
-    }
-    const effectiveMode = (standingPolicy as SandboxExecutionPolicy).mode
-    return approveEscalation(
-      { requestedMode: mode, justification, effectiveMode, subject: 'command' },
-      {
-        approver: ctx.get('approval'),
-        agent: exec.agent,
-        callId: exec.callId,
-        toolName: 'bash',
-        signal: exec.signal,
-      },
-    )
-  }
 
   // Cross-call guidance belongs in the prompt rather than one-call schema prose.
   ctx.systemPrompt.section({
@@ -278,7 +216,7 @@ export function apply(ctx: Context, config: Config = {}): void {
               proc = await ctx.shell.execute({ ...spec, signal })
               return proc
             },
-            started => processOutcome(started, escalationModes),
+            processOutcome,
           )
           return {
             done: hooks.done,
@@ -334,7 +272,6 @@ export function apply(ctx: Context, config: Config = {}): void {
           timeoutMs,
           stdout: { text: '', truncated: false },
           stderr: { text: '', truncated: false },
-          ...spec.sandboxPolicy !== undefined ? { sandbox: { mode: spec.sandboxPolicy.mode, denied: false } } : {},
         }
       }
       if (view.status === 'running' || view.status === 'stopping') {
@@ -348,7 +285,7 @@ export function apply(ctx: Context, config: Config = {}): void {
           jobId: attached.id,
           timeoutMs,
           output: renderJobRead(
-            ringDelta(read.chunks), read.lossy, read.job.output.spillPaths ?? [], attached.process()?.sandbox, escalationModes,
+            ringDelta(read.chunks), read.lossy, read.job.output.spillPaths ?? [],
           ),
         }
       }
@@ -386,18 +323,6 @@ export function apply(ctx: Context, config: Config = {}): void {
         workdir: { type: 'string', description: 'Working directory for this command. Defaults to the session workspace; a relative path is resolved against it.' },
         ...background ? {
           run_in_background: { type: 'boolean' as const, description: 'Run in the background and return a job id immediately (collect with job_output, stop with job_kill). No timeout applies.' },
-        } : {},
-        ...escalationModes.length > 0 ? {
-          sandbox_permissions: {
-            type: 'string' as const,
-            enum: [...escalationModes],
-            description: sandboxPermissionsDescription('command'),
-          },
-          justification: {
-            type: 'string' as const,
-            description: 'Required with sandbox_permissions: one sentence for the user explaining why this exact command needs the wider access. '
-              + 'Use the language of the user’s current request.',
-          },
         } : {},
       },
       output: {
@@ -451,16 +376,6 @@ export function apply(ctx: Context, config: Config = {}): void {
                     spillPath: { type: 'string' },
                   },
                 },
-                sandbox: {
-                  type: 'object',
-                  additionalProperties: false,
-                  properties: {
-                    mode: { type: 'string', required: true },
-                    denied: { type: 'boolean', required: true },
-                    enforcement: { type: 'string' },
-                    runnerFailed: { type: 'boolean' },
-                  },
-                },
               },
             },
           ],
@@ -471,20 +386,13 @@ export function apply(ctx: Context, config: Config = {}): void {
             ? `started background job ${value.jobId}`
             : value.kind === 'promoted'
               ? renderPromoted(value)
-              : renderResult(value as { kind: 'foreground' } & ShellRunResult, escalationModes),
+              : renderResult(value as { kind: 'foreground' } & ShellRunResult),
         }],
         presentationMeta: (_args, value) => ({ cwd: value.cwd }),
       },
       async execute(args: BashToolArgs, exec) {
         // Description is display metadata; workdir defaults to the caller's session.
-        const standingPolicy = resolveSandboxPolicy(exec)
-        validateBashArgs(args, standingPolicy?.mode)
-        const approvedMode = args.sandbox_permissions !== undefined && args.justification !== undefined
-          ? await approveBashEscalation(args.sandbox_permissions, args.justification, exec, standingPolicy)
-          : undefined
-        const policy = approvedMode === undefined
-          ? standingPolicy
-          : { ...(standingPolicy as SandboxExecutionPolicy), mode: approvedMode }
+        validateBashArgs(args)
         const cwd = exec.agent === undefined ? undefined : await ctx.workingDirectory.ensure(exec.agent, exec.signal)
         const workdir = resolveWorkdir(args.workdir, cwd)
         const dshEnv = ctx.shellEnv.collect(exec)
@@ -493,7 +401,6 @@ export function apply(ctx: Context, config: Config = {}): void {
           ...workdir !== undefined ? { workdir } : {},
           ...args.timeoutMs !== undefined ? { timeoutMs: args.timeoutMs } : {},
           dshEnv,
-          ...policy !== undefined ? { sandboxPolicy: policy } : {},
         }
         if (args.run_in_background === true) {
           // Undeclared keys are allowed, so schema omission also needs enforcement.

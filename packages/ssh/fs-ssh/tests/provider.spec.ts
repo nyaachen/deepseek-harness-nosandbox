@@ -1,7 +1,6 @@
 import { Context, Service } from '@deepseek-ai/cordis'
 import { fileURLToPath } from 'node:url'
 import { FsError, FsTargetKey, FsVersion, type FsTarget } from '@deepseek-ai/dsh-fs'
-import type { SandboxExecutionPolicy } from '@deepseek-ai/dsh-sandbox'
 import { RemoteOperationError } from '@deepseek-ai/dsh-ssh/protocol'
 import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import { z } from 'zod'
@@ -19,13 +18,8 @@ async function setup() {
       return result.parse(await dispatch(method, params, signal))
     }
   }
-  class Policy extends Service {
-    readonly defaultMode = 'read-only'
-    constructor(ctx: Context) { super(ctx, 'sandboxPolicy') }
-    resolve(): SandboxExecutionPolicy { return { mode: 'read-only', workspaceRoot: '/remote/work' } }
-  }
   const ctx = new Context()
-  const fibers = [await ctx.plugin(WireConnection), await ctx.plugin(Policy), await ctx.plugin(SshFileSystem)]
+  const fibers = [await ctx.plugin(WireConnection), await ctx.plugin(SshFileSystem)]
   onTestFinished(async () => { for (const fiber of fibers.reverse()) await fiber.dispose() })
   return { fs: ctx.fs, dispatch }
 }
@@ -61,7 +55,6 @@ describe('SSH filesystem provider', () => {
     expect(fs.processPathFromHostPath('/host/private/bootstrap.js')).toBeUndefined()
     await fs.resolve('file.txt')
     expect(dispatch).toHaveBeenLastCalledWith('fs.resolve', { path: 'file.txt', cwd: undefined }, undefined)
-    expect(fs.sandboxMode).toBe('read-only')
   })
 
   it('compares POSIX canonical identities without accepting a sibling prefix', async () => {
@@ -102,28 +95,18 @@ describe('SSH filesystem provider', () => {
     expect(dispatch.mock.calls[2]).toEqual(['fs.readRange', { target, offset: 1, length: 2 }, undefined])
   })
 
-  it('forwards mutation guards and explicit per-call policy without normalizing remote roots', async () => {
+  it('forwards mutation guards without adding remote-root policy fields', async () => {
     const { fs, dispatch } = await setup()
     const written = { operation: 'update', version: 'v2', before: 'old', after: 'new' }
     const edited = { version: 'v3', before: 'new', after: 'next' }
     dispatch.mockResolvedValueOnce(written).mockResolvedValueOnce(edited)
     const signal = new AbortController().signal
-    const policy: SandboxExecutionPolicy = { mode: 'workspace-write', workspaceRoot: '/remote/link/..' }
     const expected = { kind: 'replaceIfVersion' as const, version: FsVersion('v1') }
     const edit = { oldString: 'new', newString: 'next', replaceAll: false }
-    expect(await fs.writeText(target, 'new', expected, signal, policy)).toEqual(written)
-    expect(dispatch).toHaveBeenLastCalledWith('fs.write', { target, content: 'new', expected, policy }, signal)
-    expect(await fs.editText(target, edit, { version: FsVersion('v2') }, signal, policy)).toEqual(edited)
-    expect(dispatch).toHaveBeenLastCalledWith('fs.edit', { target, edit, expected: { version: 'v2' }, policy }, signal)
-  })
-
-  it('resolves deployment policy for mutations without an explicit policy', async () => {
-    const { fs, dispatch } = await setup()
-    dispatch.mockResolvedValueOnce({ operation: 'create', version: 'v1', before: null, after: 'new' })
-      .mockResolvedValueOnce({ version: 'v2', before: 'new', after: 'next' })
-    await fs.writeText(target, 'new', { kind: 'createIfAbsent' })
-    await fs.editText(target, { oldString: 'new', newString: 'next', replaceAll: true })
-    for (const [, params] of dispatch.mock.calls) expect(params).toMatchObject({ policy: { mode: 'read-only', workspaceRoot: '/remote/work' } })
+    expect(await fs.writeText(target, 'new', expected, signal)).toEqual(written)
+    expect(dispatch).toHaveBeenLastCalledWith('fs.write', { target, content: 'new', expected }, signal)
+    expect(await fs.editText(target, edit, { version: FsVersion('v2') }, signal)).toEqual(edited)
+    expect(dispatch).toHaveBeenLastCalledWith('fs.edit', { target, edit, expected: { version: 'v2' } }, signal)
   })
 
   it('pulls text through completion without an unnecessary close request', async () => {
@@ -164,7 +147,7 @@ describe('SSH filesystem provider', () => {
     expect(dispatch).toHaveBeenLastCalledWith('fs.streamClose', { id: streamId }, undefined)
   })
 
-  it.each(['FS_STALE_VERSION', 'FS_SANDBOX_DENIED', 'FS_NOT_OBSERVED'] as const)('preserves remote %s failures', async (code) => {
+  it.each(['FS_STALE_VERSION', 'FS_NOT_OBSERVED'] as const)('preserves remote %s failures', async (code) => {
     const { fs, dispatch } = await setup()
     const cause = new RemoteOperationError('remote mutation rejected', code)
     dispatch.mockRejectedValueOnce(cause)

@@ -1,15 +1,11 @@
 /** Real helper dispatch over private in-memory transport, without changing the Harness process cwd. */
 import { symlink, writeFile } from 'node:fs/promises'
 import { describe, expect, it, vi } from 'vitest'
-import { LocalSandboxProvider } from '@deepseek-ai/dsh-sandbox-local'
 import { SubprocessExecutableNotFoundError } from '@deepseek-ai/dsh-subprocess'
 import { LocalSubprocessRuntime } from '@deepseek-ai/dsh-subprocess-local'
 import { z } from 'zod'
 import { createHelperHarness as helper } from './fixtures/helper.ts'
 import { targetSchema, writeResultSchema, editResultSchema, infoSchema, entriesSchema } from '../src/schemas.ts'
-
-
-const policy = (workspaceRoot: string) => ({ mode: 'workspace-write', workspaceRoot })
 
 describe.skipIf(process.platform === 'win32')('SSH helper runtime', () => {
   it('binds relative filesystem operations to the negotiated workspace without chdir', async () => {
@@ -33,15 +29,14 @@ describe.skipIf(process.platform === 'win32')('SSH helper runtime', () => {
     const test = await helper()
     try {
       const target = await test.client.request('fs.resolve', { path: 'file.txt' }, targetSchema)
-      const created = await test.client.request('fs.write', { target, content: 'first text', policy: policy(test.root), expected: { kind: 'createIfAbsent' } }, writeResultSchema)
+      const created = await test.client.request('fs.write', { target, content: 'first text', expected: { kind: 'createIfAbsent' } }, writeResultSchema)
       expect(created).toMatchObject({ operation: 'create', before: null, after: 'first text' })
-      await expect(test.client.request('fs.write', { target, content: 'stale', policy: policy(test.root), expected: { kind: 'replaceIfVersion', version: 'stale' } }, writeResultSchema)).rejects.toMatchObject({ code: 'FS_STALE_VERSION' })
-      const updated = await test.client.request('fs.write', { target, content: 'second text', policy: policy(test.root), expected: { kind: 'replaceIfVersion', version: created.version } }, writeResultSchema)
-      const edited = await test.client.request('fs.edit', { target, edit: { oldString: 'second', newString: 'third', replaceAll: false }, expected: { version: updated.version }, policy: policy(test.root) }, editResultSchema)
+      await expect(test.client.request('fs.write', { target, content: 'stale', expected: { kind: 'replaceIfVersion', version: 'stale' } }, writeResultSchema)).rejects.toMatchObject({ code: 'FS_STALE_VERSION' })
+      const updated = await test.client.request('fs.write', { target, content: 'second text', expected: { kind: 'replaceIfVersion', version: created.version } }, writeResultSchema)
+      const edited = await test.client.request('fs.edit', { target, edit: { oldString: 'second', newString: 'third', replaceAll: false }, expected: { version: updated.version } }, editResultSchema)
       expect(edited.after).toBe('third text')
-      await test.client.request('fs.edit', { target, edit: { oldString: 'third', newString: 'fourth', replaceAll: false }, policy: policy(test.root) }, editResultSchema)
+      await test.client.request('fs.edit', { target, edit: { oldString: 'third', newString: 'fourth', replaceAll: false } }, editResultSchema)
       expect(await test.client.request('fs.readText', { target }, z.string())).toBe('fourth text')
-      await expect(test.client.request('fs.write', { target, content: 'denied', policy: { mode: 'read-only', workspaceRoot: test.root } }, writeResultSchema)).rejects.toMatchObject({ code: 'FS_SANDBOX_DENIED' })
     } finally { await test.close() }
   })
 
@@ -86,14 +81,10 @@ describe.skipIf(process.platform === 'win32')('SSH helper runtime', () => {
     } finally { await test.close() }
   })
 
-  it('refuses unconfined sandbox requests and resolves executables in the helper world', async () => {
+  it('resolves executables in the helper world', async () => {
     const test = await helper()
-    const confine = vi.spyOn(LocalSandboxProvider.prototype, 'confine').mockImplementation(async argv => ({
-      argv: ['confined', ...argv], enforcement: 'full', denialSignatures: [], runnerFailureRules: [],
-    }))
     const resolveExecutable = vi.spyOn(LocalSubprocessRuntime.prototype, 'resolveExecutable')
     try {
-      await expect(test.client.request('sandbox', { argv: ['true'], policy: { mode: 'danger-full-access', workspaceRoot: test.root } }, z.unknown())).rejects.toThrow('does not need')
       expect(await test.client.request('executable', { command: process.execPath, env: { REMOVED: null } }, z.string())).toBe(process.execPath)
       expect(await test.client.request('executable', { command: process.execPath }, z.string())).toBe(process.execPath)
       expect(await test.client.request('terminal.environment', {}, z.unknown())).toMatchObject({ platform: 'posix' })
@@ -104,9 +95,6 @@ describe.skipIf(process.platform === 'win32')('SSH helper runtime', () => {
       resolveExecutable.mockRejectedValueOnce(missing)
       await expect(test.client.request('executable', { command: 'foreign-missing' }, z.string()))
         .rejects.toMatchObject({ code: 'SUBPROCESS_EXECUTABLE_NOT_FOUND', message: 'absent module copy' })
-      const wrapped = await test.client.request('sandbox', { argv: ['true'], policy: policy(test.root) }, z.looseObject({ argv: z.array(z.string()), enforcement: z.enum(['full', 'partial']) }))
-      expect(wrapped.argv).toEqual(['confined', 'true'])
-      expect(confine).toHaveBeenCalledWith(['true'], policy(test.root), expect.any(AbortSignal))
-    } finally { resolveExecutable.mockRestore(); confine.mockRestore(); await test.close() }
+    } finally { resolveExecutable.mockRestore(); await test.close() }
   })
 })

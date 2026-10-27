@@ -35,7 +35,7 @@ kind: "package-reference"
 <details>
 <summary>实现细节——点击展开</summary>
 
-宿主半侧是一个空的 `apply`，只为让本包占一条 Loader 行，客户端模块系统据此送出浏览器半侧。浏览器半侧通过 `ctx.configForms.get` 绑定当前平台组装的 shell 执行器条目（非 Windows 为 `bash-sandbox`，Windows 为 `pwsh-sandbox`），用 `ui-primitives` 的共享 `SettingsFormModel` 在 `ShellCardController` 里维护暂存表单，并通过 `ctx.configForms.whileServed` 把 `ShellCard` 注册进插件页的 `plugins.item` slot：Host 服务任一执行器条目时注册，停止服务时注销。页面文案在本包的 `settings.shell` 字典里；`SettingsForm` 框架的文案以 props 传入。
+宿主半侧是一个空的 `apply`，只为让本包占一条 Loader 行，客户端模块系统据此送出浏览器半侧。浏览器半侧通过 `ctx.configForms.get` 绑定当前平台组装的 shell 执行器条目（非 Windows 为 `bash-local`，Windows 为 `pwsh-local`），用 `ui-primitives` 的共享 `SettingsFormModel` 在 `ShellCardController` 里维护暂存表单，并通过 `ctx.configForms.whileServed` 把 `ShellCard` 注册进插件页的 `plugins.item` slot：Host 服务任一执行器条目时注册，停止服务时注销。页面文案在本包的 `settings.shell` 字典里；`SettingsForm` 框架的文案以 props 传入。
 
 </details>
 

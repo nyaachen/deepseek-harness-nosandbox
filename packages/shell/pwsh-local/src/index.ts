@@ -180,15 +180,12 @@ export class PwshLocalExecutor extends ShellExecutor {
       ...request.stdin !== undefined ? { stdin: request.stdin } : {},
       ...request.env !== undefined ? { env: request.env } : {},
       ...request.dshEnv !== undefined ? { dshEnv: request.dshEnv } : {},
-      sandboxPolicy: request.sandboxPolicy,
     }
   }
 
   /**
    * The pwsh invocation argv for one resolved spec — the argv-level seam a
-   * confining subclass wraps through `ctx.sandbox.confine` (the pwsh twin of
-   * `dsh-bash-local`'s `executeArgv` hook; see
-   * `@deepseek-ai/dsh-pwsh-sandbox`).
+   * subclass replaces at an execution boundary.
    */
   protected argv(spec: ShellExecSpec): string[] {
     return [this.pwshPath, '-NoLogo', '-NoProfile', '-NonInteractive', '-Command', `${ENCODING_PREAMBLE}${spec.command}`]
@@ -435,8 +432,7 @@ export class PwshLocalExecutor extends ShellExecutor {
   /**
    * Settlement hook for subclasses that attach execution facts to a process.
    * The base implementation is intentionally empty. Mirrored from
-   * `dsh-bash-local` (whose sandboxing subclass consumes the same hook); the
-   * pwsh-confining consumer is `@deepseek-ai/dsh-pwsh-sandbox`.
+   * `dsh-bash-local`, whose hook consumers record per-process facts there.
    * @param _proc - the settled process handle.
    * @param _stderr - the process's retained stderr tail used by subclasses for settlement classification.
    * @param _providerRejected - whether the subprocess promise rejected without a direct outcome.

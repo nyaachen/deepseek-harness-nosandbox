@@ -11,11 +11,8 @@ import { NodePtcRuntime } from '@deepseek-ai/dsh-ptc-runtime-node'
 import Lsp from '@deepseek-ai/dsh-lsp'
 import * as LspStdio from '@deepseek-ai/dsh-lsp-stdio'
 import { SessionProjectionRegistry } from '@deepseek-ai/dsh-session-projection'
-import { SandboxPolicyService } from '@deepseek-ai/dsh-sandbox-policy'
 import { SshFileSystem } from '@deepseek-ai/dsh-fs-ssh'
 import { SshSubprocessRuntime } from '@deepseek-ai/dsh-subprocess-ssh'
-import { SshSandboxProvider } from '@deepseek-ai/dsh-sandbox-ssh'
-import type { SandboxPolicy } from '@deepseek-ai/dsh-sandbox'
 import type { SubprocessHandle } from '@deepseek-ai/dsh-subprocess'
 import { SshConnection, type Config } from '../src/index.ts'
 import { doneSchema, preparedSchema } from '../src/schemas.ts'
@@ -30,12 +27,10 @@ async function setup() {
   if (config.launch.kind !== 'node-script') throw new Error('live.e2e requires a Node script deployment; executable acceptance is owned by ssh-helper-runtime')
   const ctx = new Context()
   const projection = ctx.plugin(SessionProjectionRegistry)
-  const policy = ctx.plugin(SandboxPolicyService, { mode: 'workspace-write', workspaceRoot: config.workspace })
   const connection = ctx.plugin(SshConnection, config)
   const fs = ctx.plugin(SshFileSystem)
   const subprocess = ctx.plugin(SshSubprocessRuntime)
-  const sandbox = ctx.plugin(SshSandboxProvider)
-  const fibers = [projection, policy, connection, fs, subprocess, sandbox]
+  const fibers = [projection, connection, fs, subprocess]
   const dispose = async (): Promise<void> => { for (const fiber of fibers.reverse()) await fiber.dispose() }
   try {
     await Promise.all(fibers)
@@ -64,7 +59,7 @@ async function removeOwned(test: Awaited<ReturnType<typeof setup>>) {
 }
 
 describe.skipIf(!enabled)('POSIX SSH runtime acceptance', () => {
-  it('refuses same-user sandboxed connectors before granting a process stream', async () => {
+  it('refuses unauthenticated connectors before granting a process stream', async () => {
     const test = await setup()
     try {
       const prepared = await test.ctx.ssh.request('process.prepare', {
@@ -74,9 +69,7 @@ describe.skipIf(!enabled)('POSIX SSH runtime acceptance', () => {
       const endpoint = prepared.streams.control!
       const attack = "let connected=false,secure=false;const s=require('node:tls').connect({path:process.argv[1],ciphers:'PSK-AES256-GCM-SHA384',minVersion:'TLSv1.2',maxVersion:'TLSv1.2',pskCallback:()=>({identity:'dsh-stream',psk:Buffer.alloc(32)}),checkServerIdentity:()=>undefined});s.on('connect',()=>{connected=true});s.on('secureConnect',()=>{secure=true});s.on('error',()=>{});s.on('close',()=>process.stdout.write(JSON.stringify({connected,secure})));"
       const attacker = test.ctx.subprocess.spawn({
-        argv: (await test.ctx.sandbox.confine([test.hello.executable, '-e', attack, endpoint.path], {
-          mode: 'read-only', workspaceRoot: test.root,
-        })).argv,
+        argv: [test.hello.executable, '-e', attack, endpoint.path],
         cwd: test.root, stdio: { stdin: 'ignore', stdout: { maxBytes: 4096 }, stderr: { maxBytes: 4096 } }, graceMs: 500,
       })
       const observed = await processResult(attacker)
@@ -114,15 +107,12 @@ describe.skipIf(!enabled)('POSIX SSH runtime acceptance', () => {
       const chunks = []
       for await (const chunk of await ctx.fs.streamText(target)) chunks.push(chunk)
       expect(chunks.join('')).toBe('beta\n')
-      const policy: SandboxPolicy = { mode: 'workspace-write', workspaceRoot: root }
-      const argv = (await ctx.sandbox.confine(['/bin/bash', '-c', 'cat text.txt; printf "shell\n" > text.txt'], policy)).argv
       const result = await processResult(ctx.subprocess.spawn({
-        argv, cwd: root, stdio: { stdin: 'ignore', stdout: { maxBytes: 4096 }, stderr: { maxBytes: 4096 } }, graceMs: 500,
+        argv: ['/bin/bash', '-c', 'cat text.txt; printf "shell\n" > text.txt'], cwd: root,
+        stdio: { stdin: 'ignore', stdout: { maxBytes: 4096 }, stderr: { maxBytes: 4096 } }, graceMs: 500,
       }))
       expect(result).toMatchObject({ exitCode: 0, stdout: 'beta\n', stderr: '' })
       expect(await ctx.fs.readText(target)).toBe('shell\n')
-      await expect(ctx.fs.writeText(target, 'denied', undefined, undefined, { ...policy, mode: 'read-only' }))
-        .rejects.toMatchObject({ code: 'FS_SANDBOX_DENIED' })
       const createLink = 'const fs=require(\'node:fs\');const root=process.argv[1];fs.mkdirSync(root+\'/physical/child\',{recursive:true});fs.mkdirSync(root+\'/lexical\');fs.symlinkSync(root+\'/physical/child\',root+\'/lexical/link\');'
       await processResult(ctx.subprocess.spawn({
         argv: [hello.executable, '-e', createLink, root], cwd: root,
@@ -136,13 +126,12 @@ describe.skipIf(!enabled)('POSIX SSH runtime acceptance', () => {
     } finally { await removeOwned(test) }
   }, 60_000)
 
-  it('preserves binary fd 7 through native ownership and read-only confinement', async () => {
+  it('preserves binary fd 7 through native ownership and managed cleanup', async () => {
     const test = await setup()
     try {
-      const code = 'const fs=require(\'node:fs\');const s=new(require(\'node:net\').Socket)({fd:7,readable:true,writable:true,allowHalfOpen:true});let a=[];s.on(\'data\',b=>a.push(b));s.on(\'end\',()=>{let denied;try{fs.writeFileSync(\'forbidden\',\'bad\')}catch(e){denied=e.code}process.stdout.write(JSON.stringify({pid:process.pid,denied,cgroup:process.platform===\'linux\'?fs.readFileSync(\'/proc/self/cgroup\',\'utf8\'):\'\'}));process.stderr.write(\'stderr\');s.end(Buffer.concat(a))});'
-      const argv = (await test.ctx.sandbox.confine([test.hello.executable, '-e', code], { mode: 'read-only', workspaceRoot: test.root })).argv
+      const code = 'const fs=require(\'node:fs\');const s=new(require(\'node:net\').Socket)({fd:7,readable:true,writable:true,allowHalfOpen:true});let a=[];s.on(\'data\',b=>a.push(b));s.on(\'end\',()=>{process.stdout.write(JSON.stringify({pid:process.pid,cgroup:process.platform===\'linux\'?fs.readFileSync(\'/proc/self/cgroup\',\'utf8\'):\'\'}));process.stderr.write(\'stderr\');s.end(Buffer.concat(a))});'
       const handle = test.ctx.subprocess.spawn({
-        argv, cwd: test.root,
+        argv: [test.hello.executable, '-e', code], cwd: test.root,
         stdio: { stdin: 'ignore', stdout: { maxBytes: 4096 }, stderr: { maxBytes: 4096 }, control: 'pipe' }, graceMs: 1000,
       })
       const bytes = Buffer.from(Array.from({ length: 128 * 1024 }, (_, index) => index % 256))
@@ -153,8 +142,7 @@ describe.skipIf(!enabled)('POSIX SSH runtime acceptance', () => {
       await receiving
       expect(Buffer.concat(chunks)).toEqual(bytes)
       expect(result).toMatchObject({ exitCode: 0, stderr: 'stderr' })
-      const facts = JSON.parse(result.stdout as string) as { pid: number; denied: string; cgroup: string }
-      expect(['EROFS', 'EPERM', 'EACCES']).toContain(facts.denied)
+      const facts = JSON.parse(result.stdout as string) as { pid: number; cgroup: string }
       if (test.hello.platform === 'linux') {
         expect(facts.pid).toBe(2)
         expect(facts.cgroup).toMatch(/dsh-subprocess-[^\n]+\.scope/)
@@ -168,7 +156,7 @@ describe.skipIf(!enabled)('POSIX SSH runtime acceptance', () => {
     try {
       const code = 'const s=new(require(\'node:net\').Socket)({fd:7,readable:true,writable:true});const b=Buffer.alloc(65536,120);let n=0;function pump(){while(n<10000){n++;if(!process.stdout.write(b))return}}process.stdout.on(\'drain\',pump);s.on(\'data\',v=>s.write(v));pump();setInterval(()=>{},1000);'
       handle = test.ctx.subprocess.spawn({
-        argv: (await test.ctx.sandbox.confine([test.hello.executable, '-e', code], { mode: 'workspace-write', workspaceRoot: test.root })).argv,
+        argv: [test.hello.executable, '-e', code],
         cwd: test.root, stdio: { stdin: 'ignore', stdout: 'pipe', stderr: { maxBytes: 1024 }, control: 'pipe' }, graceMs: 500,
       })
       const reply = once(handle.control!, 'data')
@@ -246,7 +234,7 @@ describe.skipIf(!enabled)('POSIX SSH runtime acceptance', () => {
     }
   }, 60_000)
 
-  it.skipIf(bootstrap === undefined)('runs PTC remotely with empty environment, bindings, denial and a bounded hot loop', async () => {
+  it.skipIf(bootstrap === undefined)('runs PTC remotely with empty environment, bindings and a bounded hot loop', async () => {
     const test = await setup()
     const fiber = test.ctx.plugin(NodePtcRuntime, {
       launch: test.ctx.ssh.ptcLaunch,
@@ -255,20 +243,14 @@ describe.skipIf(!enabled)('POSIX SSH runtime acceptance', () => {
       await fiber
       const runtime = test.ctx.ptcRuntime
       const bindings = [{ global: 'tools', functions: { echo: async (input: unknown) => String(input) } }]
-      const policy: SandboxPolicy = { mode: 'workspace-write', workspaceRoot: test.root }
       const result = await runtime.run(runtime.resolve({
         program: 'const fs=await import(\'node:fs/promises\');await fs.writeFile(\'ptc.txt\',\'node\');return {where:process.cwd(),env:Object.keys(process.env),echo:await tools.echo(\'host binding\')}',
-        bindings, cwd: test.root, sandboxPolicy: policy,
+        bindings, cwd: test.root,
       }))
-      expect(result).toMatchObject({ value: { where: test.root, env: [], echo: 'host binding' }, sandbox: { mode: 'workspace-write' } })
+      expect(result).toMatchObject({ value: { where: test.root, env: [], echo: 'host binding' } })
       expect(result.error).toBeUndefined()
       expect(await test.ctx.fs.readText(await test.ctx.fs.resolve(`${test.root}/ptc.txt`))).toBe('node')
-      const denied = await runtime.run(runtime.resolve({
-        program: 'await(await import(\'node:fs/promises\')).writeFile(\'denied.txt\',\'bad\')', bindings, cwd: test.root,
-        sandboxPolicy: { ...policy, mode: 'read-only' },
-      }))
-      expect(denied).toMatchObject({ error: { kind: 'exception' }, sandbox: { denied: true } })
-      const timed = await runtime.run(runtime.resolve({ program: 'while(true){}', bindings, cwd: test.root, sandboxPolicy: policy, timeoutMs: 1500 }))
+      const timed = await runtime.run(runtime.resolve({ program: 'while(true){}', bindings, cwd: test.root, timeoutMs: 1500 }))
       expect(timed.error?.kind).toBe('timeout')
     } finally { await fiber.dispose(); await removeOwned(test) }
   }, 60_000)

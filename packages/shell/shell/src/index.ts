@@ -6,7 +6,6 @@
  */
 
 import { Context, Service } from '@deepseek-ai/cordis'
-import type { SandboxMode } from '@deepseek-ai/dsh-sandbox'
 import type { ShellExecRequest, ShellExecSpec, ShellExecution } from './types.ts'
 
 export { DSH_ENV_PREFIX } from './types.ts'
@@ -19,7 +18,6 @@ export type {
   ShellProcessRead,
   ShellProcessStatus,
   ShellRunResult,
-  ShellSandboxInfo,
   CollectedOutput,
   DshEnvironment,
   DshEnvironmentKey,
@@ -64,15 +62,6 @@ declare module '@deepseek-ai/cordis' {
 export abstract class ShellExecutor extends Service {
   constructor(ctx: Context) {
     super(ctx, 'shell')
-  }
-
-  /**
-   * The sandbox mode this executor applies by default, or `undefined` when it
-   * does not sandbox commands.
-   * @returns the configured default sandbox mode, when supported.
-   */
-  get sandboxMode(): SandboxMode | undefined {
-    return undefined
   }
 
   /**

@@ -4,12 +4,9 @@ import { stripTypeScriptTypes } from 'node:module'
 import { isAbsolute } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import { PtcRuntime } from '@deepseek-ai/dsh-ptc-runtime'
-import type { PtcBindingNamespace, PtcJsonValue, PtcRunFailure, PtcRunRequest, PtcRunResult, PtcRunSandbox, PtcRunSpec } from '@deepseek-ai/dsh-ptc-runtime'
+import type { PtcBindingNamespace, PtcJsonValue, PtcRunFailure, PtcRunRequest, PtcRunResult, PtcRunSpec } from '@deepseek-ai/dsh-ptc-runtime'
 import { clampTimeout } from '@deepseek-ai/dsh-timeout'
-import { SandboxUnavailableError, classifyRunnerFailure, isRunnerSpawnFailure } from '@deepseek-ai/dsh-sandbox'
-import type { ConfinedArgv, SandboxExecutionPolicy, SandboxMode } from '@deepseek-ai/dsh-sandbox'
 import type { SubprocessHandle, SubprocessOutcome } from '@deepseek-ai/dsh-subprocess'
-import type {} from '@deepseek-ai/dsh-sandbox-policy'
 import type {} from '@deepseek-ai/dsh-fs'
 import { replyToBinding, validateBindings } from './bindings.ts'
 import { JsonChannel } from './channel.ts'
@@ -33,19 +30,18 @@ const STRIP_SUFFIX = '\n}'
 function messageOf(error: unknown): string { return error instanceof Error ? error.message : String(error) }
 function record(value: unknown): value is Record<string, unknown> { return typeof value === 'object' && value !== null && !Array.isArray(value) }
 
-/** Node execution under file policy, with optional owner-scoped retained memory. */
+/** Node execution in a per-call process, with optional owner-scoped retained memory. */
 export class NodePtcRuntime extends PtcRuntime {
-  static inject = ['fs', 'subprocess', 'sandbox', 'sandboxPolicy']
+  static inject = ['fs', 'subprocess']
   static Config = NodeConfig
   readonly language = 'typescript'
   readonly isolation = 'process'
   private readonly inMemory?: InMemoryExecution
-  private readonly processes: PolicyProcesses
 
   override get programFormat(): 'function-body' | 'repl' { return this.inMemory ? 'repl' : 'function-body' }
   override get executionInstructions(): string {
     if (this.inMemory) return this.inMemory.executionInstructions
-    return 'The program is the body of an async TypeScript function; only erasable syntax is accepted, with no enum or namespaces. Type annotations are advisory. Top-level await and return are supported. Emit output with console.log(...) or return a lossless JSON value. Only printed values and the returned value become program output. Each call runs in a fresh Node process. Node APIs are available through await import(...). Relative paths use the supplied working directory; process.env starts empty. Direct filesystem access follows this execution\'s sandbox policy.'
+    return 'The program is the body of an async TypeScript function; only erasable syntax is accepted, with no enum or namespaces. Type annotations are advisory. Top-level await and return are supported. Emit output with console.log(...) or return a lossless JSON value. Only printed values and the returned value become program output. Each call runs in a fresh Node process. Node APIs are available through await import(...). Relative paths use the supplied working directory; process.env starts empty.'
   }
   private readonly config: ResolvedConfig
   private readonly live = new Set<LiveRun>()
@@ -55,9 +51,8 @@ export class NodePtcRuntime extends PtcRuntime {
     super(ctx)
     this.config = { ...config, launch: resolveLaunch(config.launch) } as ResolvedConfig
     validateConfig(this.config)
-    this.processes = new PolicyProcesses(ctx)
     if (this.config.executionMode === 'persistent-in-memory') {
-      this.inMemory = new InMemoryExecution(ctx, this.config, this.processes)
+      this.inMemory = new InMemoryExecution(ctx, this.config, new PolicyProcesses(ctx))
     }
     ctx.effect(() => async () => {
       this.disposed = true
@@ -66,8 +61,6 @@ export class NodePtcRuntime extends PtcRuntime {
       await Promise.all(active.map(run => run.finished))
     }, 'Node ptc-runtime cleanup')
   }
-
-  override get sandboxMode(): SandboxMode | undefined { return this.ctx.sandboxPolicy.defaultMode }
 
   override release(owner: object): Promise<void> {
     return this.inMemory ? this.inMemory.release(owner) : super.release(owner)
@@ -78,52 +71,43 @@ export class NodePtcRuntime extends PtcRuntime {
   }
 
   /**
-   * Resolve directory, deadline and file policy for the selected execution mode.
-   * @param request - Program, bindings, optional cwd/deadline, and resolved authority.
+   * Resolve directory and deadline for the selected execution mode.
+   * @param request - Program, bindings, optional cwd/deadline, and cancellation.
    * @returns Complete execution inputs with a capped numeric budget or an explicit null deadline.
    */
   resolve(request: PtcRunRequest): PtcRunSpec {
     if (this.inMemory) return this.inMemory.resolve(request)
     if (this.disposed) throw new Error('ptc-runtime-node: resolve after disposal')
-    const sandboxPolicy = request.sandboxPolicy ?? this.ctx.sandboxPolicy.resolve()
-    const cwd = request.cwd ?? sandboxPolicy.workspaceRoot
+    // The provider process directory serves a caller that supplies no directory of its own.
+    const cwd = request.cwd ?? process.cwd()
     if (!isAbsolute(cwd)) throw new Error('ptc-runtime-node: cwd must be absolute')
     return {
       ...request,
       cwd,
       timeoutMs: request.timeoutMs === null ? null : clampTimeout(request.timeoutMs, this.config.timeoutMs, this.config.maxTimeoutMs, 'ptc-runtime-node: timeoutMs'),
-      sandboxPolicy,
     }
   }
 
   /**
    * Run a resolved program under the configured execution mode.
-   * Session mode changes cancel admitted calls before process launch as well as active programs.
    * @param spec - Inputs returned by resolve for the configured mode.
-   * @returns Logs, JSON completion or failure; retained processes remain until release or invalidation.
+   * @returns Logs, JSON completion or failure; retained processes remain until release or process failure.
    */
   async run(spec: PtcRunSpec): Promise<PtcRunResult> {
     if (this.disposed) throw new Error('ptc-runtime-node: run after disposal')
     const controller = new AbortController()
     const completion = Promise.withResolvers<void>()
-    const unregister = spec.sandboxPolicy === undefined ? undefined : this.processes.register(spec.sandboxPolicy, async () => {
-      controller.abort(new Error('sandbox mode changed'))
-      await completion.promise
-    })
     const live = { controller, finished: completion.promise }
     this.live.add(live)
     try {
-      await this.processes.wait(spec.sandboxPolicy?.sessionId)
       if (this.inMemory) {
         const signal = spec.signal === undefined ? controller.signal : AbortSignal.any([spec.signal, controller.signal])
         return await this.inMemory.run({ ...spec, signal })
       }
-      if (spec.sandboxPolicy === undefined) throw new Error('ptc-runtime-node: run requires a resolved sandbox policy')
       if (!isAbsolute(spec.cwd) || (spec.timeoutMs !== null && (!Number.isFinite(spec.timeoutMs) || spec.timeoutMs <= 0 || spec.timeoutMs > this.config.maxTimeoutMs))) throw new Error('ptc-runtime-node: run requires resolved cwd and timeout')
       const bindings = validateBindings(spec)
-      return await this.execute(spec, spec.sandboxPolicy, bindings, controller)
+      return await this.execute(spec, bindings, controller)
     } finally {
-      unregister?.()
       this.live.delete(live)
       completion.resolve()
     }
@@ -131,19 +115,16 @@ export class NodePtcRuntime extends PtcRuntime {
 
   private async execute(
     spec: PtcRunSpec,
-    policy: SandboxExecutionPolicy,
     bindings: Map<string, PtcBindingNamespace>,
     controller: AbortController,
   ): Promise<PtcRunResult> {
     const replyBinding = AsyncLocalStorage.bind(replyToBinding)
     const output = new OutputLedger(this.config.maxOutputBytes)
     const logs: string[] = []
-    const sandbox: PtcRunSandbox = { mode: policy.mode, denied: false }
     const result = Promise.withResolvers<PtcRunResult>()
     const signal = spec.signal === undefined ? controller.signal : AbortSignal.any([spec.signal, controller.signal])
     let handle: SubprocessHandle | undefined
     let channel: JsonChannel | undefined
-    let confined: ConfinedArgv | undefined
     let settled = false
     let timedOut = false
     let outputOverflow = false
@@ -156,7 +137,7 @@ export class NodePtcRuntime extends PtcRuntime {
     const stop = (): Promise<boolean> => {
       if (stopping !== undefined) return stopping
       const cleanup = handle === undefined ? Promise.resolve(true) : terminateProcess(handle, this.config.graceMs)
-      stopping = cleanup.then((drained) => { unregister(); return drained }, (error: unknown) => {
+      stopping = cleanup.catch((error: unknown) => {
         stopping = undefined
         throw error
       })
@@ -179,7 +160,7 @@ export class NodePtcRuntime extends PtcRuntime {
         }
         const outcome = outputOverflow ? overflowResult ?? output.limit(logs)
           : failure === undefined ? output.success(logs, value) : output.failure(logs, failure)
-        result.resolve({ ...outcome, sandbox: { ...sandbox } })
+        result.resolve(outcome)
       })()
     }
     const onAbort = (): void => {
@@ -187,10 +168,6 @@ export class NodePtcRuntime extends PtcRuntime {
         ? { kind: 'timeout', message: `execution deadline reached (${spec.timeoutMs}ms)` }
         : { kind: 'abort', message: messageOf(signal.reason) })
     }
-    const unregister = this.processes.register(policy, async () => {
-      controller.abort(new Error('sandbox mode changed'))
-      await stop()
-    })
     signal.addEventListener('abort', onAbort, { once: true })
     if (signal.aborted) onAbort()
     try {
@@ -216,10 +193,6 @@ export class NodePtcRuntime extends PtcRuntime {
       const heapFlag = `--max-old-space-size=${this.config.maxOldGenerationSizeMb}`
       const argv = [executable, ...packaged ? [] : [heapFlag],
         ...bootstrapArgs(this.ctx.fs, this.config.launch, this.config.maxMessageBytes)]
-      confined = policy.mode === 'danger-full-access' ? undefined : await this.ctx.sandbox.confine(argv, { ...policy, mode: policy.mode }, signal)
-      // oxlint-disable-next-line typescript/no-unnecessary-condition -- Cancellation can settle during awaited confinement.
-      if (settled) return await result.promise
-      if (confined !== undefined) sandbox.enforcement = confined.enforcement
       // Electron needs its Node-mode selector until bootstrap; the child then removes it with other ambient values.
       const env: NodeJS.ProcessEnv = Object.fromEntries(Object.keys(process.env)
         .filter(key => !STARTUP_ENVIRONMENT_NAMES.has(key.toUpperCase()) && key.toUpperCase() !== 'ELECTRON_RUN_AS_NODE')
@@ -228,7 +201,7 @@ export class NodePtcRuntime extends PtcRuntime {
         env.DSH_PTC_RUNTIME_NODE = '1'
         env.NODE_OPTIONS = heapFlag
       }
-      handle = this.ctx.subprocess.spawn({ argv: confined?.argv ?? argv, cwd: spec.cwd, env, stdio: { stdin: 'ignore', stdout: 'pipe', stderr: 'pipe', control: 'pipe' }, graceMs: this.config.graceMs, signal })
+      handle = this.ctx.subprocess.spawn({ argv, cwd: spec.cwd, env, stdio: { stdin: 'ignore', stdout: 'pipe', stderr: 'pipe', control: 'pipe' }, graceMs: this.config.graceMs, signal })
       const launched = handle
       if (launched.control === undefined || launched.stdout === undefined || launched.stderr === undefined) {
         throw new Error('subprocess provider did not supply the requested control and output pipes')
@@ -269,9 +242,7 @@ export class NodePtcRuntime extends PtcRuntime {
       const protocolFailure = (message: string): void => { finish({ kind: 'protocol', message }) }
       const processFinished = (outcome: SubprocessOutcome): void => {
         if (settled) return
-        finish((confined !== undefined && classifyRunnerFailure(outcome.exitCode, stderr, confined.runnerFailureRules) !== undefined)
-          ? { kind: 'sandbox-unavailable', message: stderr }
-          : { kind: 'worker-exit', message: `Node process exited before completing (${String(outcome.exitCode)})${stderr ? `: ${stderr}` : ''}` })
+        finish({ kind: 'worker-exit', message: `Node process exited before completing (${String(outcome.exitCode)})${stderr ? `: ${stderr}` : ''}` })
       }
       const transport: JsonChannel = new JsonChannel(launched.control, this.config.maxMessageBytes, (raw, bytes) => {
         if (!record(raw)) { protocolFailure('invalid control frame'); return }
@@ -291,10 +262,6 @@ export class NodePtcRuntime extends PtcRuntime {
             if (raw.error !== undefined) {
               if (!record(raw.error) || typeof raw.error.message !== 'string' || (raw.error.kind !== 'exception' && raw.error.kind !== 'invalid-output' && raw.error.kind !== 'output-limit')) { protocolFailure('invalid terminal error'); return }
               const failure = { kind: raw.error.kind, message: raw.error.message } as PtcRunFailure
-              if (confined !== undefined) {
-                sandbox.denied = confined.denialSignatures.some(signature =>
-                  failure.message.toLowerCase().includes(signature.toLowerCase()))
-              }
               if (failure.kind === 'output-limit') outputOverflow = true
               finish(failure)
               return
@@ -334,9 +301,9 @@ export class NodePtcRuntime extends PtcRuntime {
       void launched.done.then((outcome) => {
         // Allow queued control-frame callbacks to run before classifying a command exit.
         setImmediate(() => { processFinished(outcome) })
-      }, (error: unknown) => { finish({ kind: confined !== undefined && isRunnerSpawnFailure(error, confined.argv[0], spec.cwd) ? 'sandbox-unavailable' : 'worker-exit', message: messageOf(error) }) })
+      }, (error: unknown) => { finish({ kind: 'worker-exit', message: messageOf(error) }) })
     } catch (error: unknown) {
-      finish({ kind: error instanceof SandboxUnavailableError ? 'sandbox-unavailable' : parsing ? 'exception' : 'worker-exit', message: messageOf(error) })
+      finish({ kind: parsing ? 'exception' : 'worker-exit', message: messageOf(error) })
     }
     return await result.promise
   }

@@ -1,4 +1,3 @@
-import { setSandboxMode } from '@deepseek-ai/dsh-sandbox-policy'
 import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import { provideWorkingDirectoryFixture } from '@deepseek-ai/dsh-agent-loop-testkit'
 import { Context } from '@deepseek-ai/cordis'
@@ -14,10 +13,8 @@ import ToolRuntime, { CodeRunFailedError, RUN_CODE_NAME, TOOL_ABORTED_BEFORE_DIS
 import type { Config, JsonSchemaNode, PostToolDecision, ToolExecutionResult } from '@deepseek-ai/dsh-tools'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import SessionStore, { Session, SessionId } from '@deepseek-ai/dsh-session'
-import ApprovalService, { type ApprovalOutcome, type ApprovalRequest } from '@deepseek-ai/dsh-user-approval'
 import type { SessionEventMap } from '@deepseek-ai/dsh-session'
 import type { JsonValue } from '@deepseek-ai/dsh-util-values'
-import SandboxPolicy from '@deepseek-ai/dsh-sandbox-policy'
 import SessionProjections from '@deepseek-ai/dsh-session-projection'
 
 declare module '@deepseek-ai/dsh-llm' {
@@ -2219,71 +2216,12 @@ describe('per-agent presentation', () => {
   })
 })
 
-
-class ConfinedFakeRuntime extends FakeRuntime {
-  override get sandboxMode() { return 'read-only' as const }
-}
-
-describe('PTC standing file policy and sandbox outcomes', () => {
-  it('requires a policy owner before dispatching a confined runtime', async () => {
-    const { ctx } = await setup({ runtime: false })
-    try {
-      await ctx.plugin(ConfinedFakeRuntime)
-      const result = await runCode(ctx, 'return 1')
-      expect(result.isError).toBe(true)
-      expect(result.content).toEqual([{ type: 'text', text: 'Error: dsh-tools: confined PTC runtime requires sandboxPolicy' }])
-      expect((ctx.ptcRuntime as ConfinedFakeRuntime).lastRequest).toBeUndefined()
-    } finally { await ctx.fiber.dispose() }
-  })
-
-  it('resolves deployment policy for an agentless program', async () => {
-    const { ctx } = await setup({ runtime: false })
-    try {
-      await ctx.plugin(SessionProjections)
-      await ctx.plugin(SandboxPolicy, { mode: 'read-only', workspaceRoot: process.cwd() })
-      await ctx.plugin(ConfinedFakeRuntime)
-      const result = await runCode(ctx, 'return 1')
-      expect(result.isError).not.toBe(true)
-      expect((ctx.ptcRuntime as ConfinedFakeRuntime).lastRequest?.sandboxPolicy).toEqual(ctx.sandboxPolicy.resolve())
-    } finally { await ctx.fiber.dispose() }
-  })
-
-  it('preserves partial enforcement and observed denial in successful output', async () => {
-    const { ctx, runtime } = await setup()
-    try {
-      runtime.behavior = async () => ({ logs: [], sandbox: { mode: 'read-only', enforcement: 'partial', denied: true } })
-      const result = await runCode(ctx, 'return 1')
-      expect(result.value).toEqual({ logs: [], sandbox: { mode: 'read-only', enforcement: 'partial', denied: true } })
-      expect(result.content).toEqual([{ type: 'text', text: 'File sandbox enforcement is partial on this host.\nThe read-only file sandbox denied an operation.' }])
-    } finally { await ctx.fiber.dispose() }
-  })
-
-  it.each([
-    { mode: 'danger-full-access' as const, denied: false },
-    { mode: 'read-only' as const, denied: true, enforcement: 'full' as const },
-  ])('includes the available sandbox facts with a failed program ($mode)', async (sandbox) => {
-    const { ctx, runtime } = await setup()
-    try {
-      runtime.behavior = async () => ({ logs: [], error: { kind: 'exception', message: 'failed' }, sandbox })
-      const result = await runCode(ctx, 'throw new Error("failed")')
-      expect(result.isError).toBe(true)
-      const text = result.content.filter(block => block.type === 'text').map(block => block.text).join('\n')
-      expect(text).toContain(`File sandbox: ${sandbox.mode}`)
-      expect(text.includes('enforcement: full')).toBe('enforcement' in sandbox)
-      expect(text.includes('operation denied')).toBe(sandbox.denied)
-    } finally { await ctx.fiber.dispose() }
-  })
-})
-
 describe('per-program execution controls', () => {
-  async function controlledSetup(approval = true) {
+  async function controlledSetup() {
     const state = await setup()
     await state.ctx.plugin(SessionStore)
     await state.ctx.plugin(SessionProjections)
-    await state.ctx.plugin(SandboxPolicy, { mode: 'read-only', workspaceRoot: process.cwd() })
-    if (approval) await state.ctx.plugin(ApprovalService, { policy: 'ask' })
     Object.defineProperties(state.runtime, {
-      sandboxMode: { get: () => 'read-only' },
       executionInstructions: { get: () => 'Programs start with an empty environment.' },
       timeout: { get: () => ({ defaultMs: 120_000, maxMs: 600_000 }) },
     })
@@ -2297,24 +2235,12 @@ describe('per-program execution controls', () => {
     return { ...state, agent, session, execute }
   }
 
-  it('executes an agentless confined program without a Session execution scope', async () => {
+  it('executes an agentless program without a Session state owner', async () => {
     const { ctx, runtime } = await controlledSetup()
     try {
       expect((await runCode(ctx, 'program')).isError).toBe(false)
       expect(runtime.lastRequest?.stateOwner).toBeUndefined()
-      expect(runtime.lastRequest?.sandboxPolicy?.sessionId).toBeUndefined()
     } finally { await ctx.fiber.dispose() }
-  })
-
-  it('rejects Agent-owned confined execution when its policy service is absent', async () => {
-    const { ctx, runtime } = await setup()
-    const mode = vi.spyOn(runtime, 'sandboxMode', 'get').mockReturnValue('read-only')
-    const { agent } = fakeAgent()
-    try {
-      const result = await runCode(ctx, 'program', { agent })
-      expect(result.isError).toBe(true)
-      expect(JSON.stringify(result.content)).toContain('confined PTC runtime requires sandboxPolicy')
-    } finally { mode.mockRestore(); await ctx.fiber.dispose() }
   })
 
   it('advertises configured timeout values and one-execution scope only when supported', async () => {
@@ -2322,8 +2248,6 @@ describe('per-program execution controls', () => {
     try {
       const schema = tools.schemas().find(tool => tool.name === RUN_CODE_NAME)!
       expect(JSON.stringify(schema.parameters)).toContain('Default 120000; capped at 600000')
-      expect(JSON.stringify(schema.parameters)).toContain('sandbox_permissions')
-      expect(schema.description).toContain('Nested tools retain their own policies')
       expect(schema.description).toContain('Programs start with an empty environment.')
       expect(schema.description).toContain("Each program starts in the Session's current directory. Running programs keep their initial directory.")
     } finally { await ctx.fiber.dispose() }
@@ -2331,7 +2255,6 @@ describe('per-program execution controls', () => {
     try {
       const schema = python.tools.schemas().find(tool => tool.name === RUN_CODE_NAME)!
       expect(JSON.stringify(schema.parameters)).not.toContain('timeoutMs')
-      expect(JSON.stringify(schema.parameters)).not.toContain('sandbox_permissions')
       expect(schema.description).not.toContain('Programs start with an empty environment.')
       expect(schema.description).toContain("Each program starts in the Session's current directory. Running programs keep their initial directory.")
       const rejected = await python.tools.execute({
@@ -2351,19 +2274,6 @@ describe('per-program execution controls', () => {
     } finally { await ctx.fiber.dispose() }
   })
 
-  it('rejects escalation fields for a runtime without confinement support', async () => {
-    const { ctx, tools, runtime } = await setup()
-    try {
-      const result = await tools.execute({
-        callId: ToolCallId('unsupported-escalation'), name: RUN_CODE_NAME, signal: testToolSignal,
-        arguments: { code: 'return 1', description: 'Try an unsupported mode', sandbox_permissions: 'workspace-write', justification: 'Need file writes' },
-      })
-      expect(result.isError).toBe(true)
-      expect(JSON.stringify(result.content)).toContain('sandbox_permissions is not available for this PTC runtime')
-      expect(runtime.lastRequest).toBeUndefined()
-    } finally { await ctx.fiber.dispose() }
-  })
-
   it('forwards an explicit timeout to the runtime resolver', async () => {
     const { ctx, runtime, execute } = await controlledSetup()
     const resolver = vi.spyOn(runtime, 'resolve')
@@ -2373,124 +2283,19 @@ describe('per-program execution controls', () => {
     } finally { await ctx.fiber.dispose() }
   })
 
-  it.each([
-    { sandbox_permissions: 'workspace-write' },
-    { justification: 'Need writes' },
-    { sandbox_permissions: 'workspace-write', justification: ' ' },
-    { sandbox_permissions: 'read-only', justification: 'No widening' },
-  ])('rejects invalid escalation pairing or mode: %j', async (args) => {
+  it('reports captured output from a failed program without replaying it', async () => {
     const { ctx, runtime, execute } = await controlledSetup()
-    const ask = vi.fn(() => Promise.resolve<ApprovalOutcome>('allowed-once'))
-    ctx.on('approval/request', ask)
-    try {
-      expect((await execute(args)).isError).toBe(true)
-      expect(ask).not.toHaveBeenCalled()
-      expect(runtime.lastRequest).toBeUndefined()
-    } finally { await ctx.fiber.dispose() }
-  })
-
-  it.each(['rejected', 'cancelled', 'unavailable'] as const)('does not start a program after approval returns %s', async (outcome) => {
-    const { ctx, runtime, session, execute } = await controlledSetup()
-    ctx.on('approval/request', () => Promise.resolve<ApprovalOutcome>(outcome))
-    try {
-      expect((await execute({ sandbox_permissions: 'workspace-write', justification: 'Write generated source' })).isError).toBe(true)
-      expect(runtime.lastRequest).toBeUndefined()
-      expect(session.snapshotEvents().filter(event => event.type === 'approval/decided').map(event => event.data)).toMatchObject([{ outcome }])
-    } finally { await ctx.fiber.dispose() }
-  })
-
-  it('reuses the standing owner when sandbox_permissions repeats the current mode', async () => {
-    const { ctx, runtime, session, agent, execute } = await controlledSetup()
-    const ask = vi.fn(() => Promise.resolve<ApprovalOutcome>('allowed-once'))
-    ctx.on('approval/request', ask)
-    try {
-      setSandboxMode(session, 'workspace-write')
-      expect((await execute({ sandbox_permissions: 'workspace-write', justification: 'Use current file permissions' })).isError).toBe(false)
-      expect(runtime.lastRequest?.stateOwner).toBe(agent)
-      expect(ask).not.toHaveBeenCalled()
-    } finally { await ctx.fiber.dispose() }
-  })
-
-  it('fails closed when no approval service is mounted', async () => {
-    const { ctx, runtime, execute } = await controlledSetup(false)
-    try {
-      const result = await execute({ sandbox_permissions: 'workspace-write', justification: 'Write generated source' })
-      expect(result.isError).toBe(true)
-      expect(runtime.lastRequest).toBeUndefined()
-    } finally { await ctx.fiber.dispose() }
-  })
-
-  it.each(['caller', 'policy'] as const)('cancels an outstanding approval after %s cancellation without launching the program', async (source) => {
-    const { ctx, runtime, session, execute } = await controlledSetup()
-    const asked = Promise.withResolvers<undefined>()
-    const answer = Promise.withResolvers<ApprovalOutcome>()
-    const controller = new AbortController()
-    ctx.on('approval/request', () => { asked.resolve(undefined); return answer.promise })
-    const result = execute({ sandbox_permissions: 'workspace-write', justification: 'Write generated source' }, controller.signal)
-    try {
-      await asked.promise
-      if (source === 'caller') controller.abort('cancel outer approval')
-      else setSandboxMode(session, 'workspace-write')
-      expect((await result).isError).toBe(true)
-      expect(runtime.lastRequest).toBeUndefined()
-    } finally { answer.resolve('cancelled'); await result; await ctx.fiber.dispose() }
-  })
-
-  it('reports prior effects after a denial and never requests approval or replays implicitly', async () => {
-    const { ctx, runtime, execute } = await controlledSetup()
-    const ask = vi.fn(() => Promise.resolve<ApprovalOutcome>('allowed-once'))
-    ctx.on('approval/request', ask)
     let effects = 0
     runtime.behavior = () => {
       effects++
-      return Promise.resolve({ logs: ['first effect completed'],
-        error: { kind: 'exception', message: 'access denied' },
-        sandbox: { mode: 'read-only', denied: true, enforcement: 'full' } })
+      return Promise.resolve({ logs: ['first effect completed'], error: { kind: 'exception', message: 'access denied' } })
     }
     try {
       const result = await execute({})
       expect(result.isError).toBe(true)
       expect(JSON.stringify(result.content)).toContain('first effect completed')
-      expect(JSON.stringify(result.content)).toContain('Earlier effects may already have completed')
       expect(effects).toBe(1)
-      expect(ask).not.toHaveBeenCalled()
     } finally { await ctx.fiber.dispose() }
-  })
-
-  it('waits for outer approval before resolving execution and keeps nested tool approvals independent', async () => {
-    const { ctx, runtime, agent, execute } = await controlledSetup()
-    const asked = Promise.withResolvers<undefined>()
-    const answer = Promise.withResolvers<ApprovalOutcome>()
-    const requests: ApprovalRequest[] = []
-    ctx.on('approval/request', (req) => {
-      requests.push(req)
-      if (req.toolName === RUN_CODE_NAME) { asked.resolve(undefined); return answer.promise }
-      return Promise.resolve<ApprovalOutcome>('rejected')
-    })
-    registerEcho(ctx)
-    ctx.on('tools/pre-execute', (exec, next) => exec.name === 'echo'
-      ? Promise.resolve({ kind: 'ask', reason: 'Nested tool has its own approval' }) : next())
-    runtime.behavior = async (request) => {
-      expect(request.sandboxPolicy?.mode).toBe('workspace-write')
-      expect(ctx.sandboxPolicy.resolve({ session: agent.session }).mode).toBe('read-only')
-      const value = await request.bindings[0]!.functions.echo!({ value: 'nested' })
-        .then(() => 'unexpected nested grant', () => 'nested approval rejected')
-      return { logs: [], value }
-    }
-    const resolver = vi.spyOn(runtime, 'resolve')
-    const result = execute({ sandbox_permissions: 'workspace-write', justification: 'Write generated source', timeoutMs: 1234 })
-    try {
-      await asked.promise
-      expect(resolver).not.toHaveBeenCalled()
-      expect(runtime.lastRequest).toBeUndefined()
-      answer.resolve('allowed-once')
-      const completed = await result
-      expect(completed.isError).toBe(false)
-      expect(requests.map(req => req.toolName)).toEqual([RUN_CODE_NAME, 'echo'])
-      expect(runtime.lastRequest?.timeoutMs).toBe(1234)
-      expect(runtime.lastRequest?.stateOwner).toBeUndefined()
-      expect(ctx.sandboxPolicy.resolve({ session: agent.session }).mode).toBe('read-only')
-    } finally { answer.resolve('cancelled'); await result; await ctx.fiber.dispose() }
   })
 })
 

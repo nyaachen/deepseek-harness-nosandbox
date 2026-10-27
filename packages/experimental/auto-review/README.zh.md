@@ -1,5 +1,5 @@
 ---
-description: "为 Web profile 添加实验性逐调用 Auto review，在工具以 Full access 执行前使用当前 agent 的模型审查。"
+description: "为 profile 添加实验性逐调用 LLM 授权审查门，在每次工具执行前使用当前 agent 的模型审查。"
 kind: "package-bundle"
 ---
 
@@ -9,7 +9,7 @@ kind: "package-bundle"
 
 ## 概述
 
-为 Web profile 当前会话权限选择器添加 Auto review。每次原生或 PTC inner 工具调用前，当前 agent 的 provider 与模型会评估待执行动作；获准调用以 Full access 执行，被拒绝调用会请求用户审批。dsh 安装随附此层但默认关闭；在 Web 侧栏插件页开启或显式安装之前，默认 Web 保持三种权限模式。Auto review 是实验功能：它可能误放行不安全动作、误拒绝有用操作，并消耗额外 token。
+为 profile 添加授权审查门。每次原生或 PTC inner 工具调用前，当前 agent 的 provider 与模型会评估待执行动作；获准调用继续执行，被拒绝调用会请求用户审批。组合此层即为该部署的全部 Session 装上门禁，没有逐会话开关；dsh 安装随附此层但默认关闭，默认 Web 与 Headless 完全不组合审查。Auto review 是实验功能：它可能误放行不安全动作、误拒绝有用操作，并消耗额外 token。
 
 ## 目录
 
@@ -35,7 +35,7 @@ kind: "package-bundle"
 pnpm dsh plugin --profile web add ./packages/experimental/auto-review
 ```
 
-CLI 会在需要时初始化 profile，并将本包声明的 patch 追加到 base 与 Web 层之后。Reconciliation 将 patch 激活为 profile 层；没有 `dsh.bundle.patch` 的包只是已安装依赖。在 composer 菜单或 `/permission` 选择器中选择带 `EXP` 标记的「自动审查」，并确认当前会话风险对话框。显式 `/permission auto` 命令直接切换。通用设置与未来会话默认值不提供 Auto。
+CLI 会在需要时初始化 profile，并将本包声明的 patch 追加到 base 与 Web 层之后。Reconciliation 将 patch 激活为 profile 层；没有 `dsh.bundle.patch` 的包只是已安装依赖。组合此层即为该 profile 的每个 Session 装上门禁：没有逐会话开关，卸载此层就是关闭它的方式。
 
 通过同一 CLI 移除此层：
 
@@ -45,9 +45,9 @@ pnpm dsh plugin --profile web remove @deepseek-ai/dsh-experimental-auto-review
 
 ### 获得的能力
 
-Auto 在每个受支持调用的 body 执行前审查一次，包括每个已开始的 PTC `tools.*` inner call。它按实际效果分类：普通项目内操作和精确清理本 Session 创建的对象属于 low，直接允许；不可逆删除既有对象、生产操作、外部写入和安全控制变更属于 medium，需要当前 human 或直接父级明确授权动作、目标与范围。跨信任边界泄露敏感信息属于 high，始终拒绝。效果不明确和授权冲突未解决时拒绝。选择 Auto 会设置 `ask` 审批策略，因此被拒绝调用会请求用户审批，获批后才执行；审批被拒绝或取消时 body 不执行。进程内委派 child 固定 `never` 策略，其拒绝是最终结果。Reviewer 响应不合法和技术失败会以具体错误使调用失败，且从不执行。
+Auto 在每个受支持调用的 body 执行前审查一次，包括每个已开始的 PTC `tools.*` inner call。它按实际效果分类：普通项目内操作和精确清理本 Session 创建的对象属于 low，直接允许；不可逆删除既有对象、生产操作、外部写入和安全控制变更属于 medium，需要当前 human 或直接父级明确授权动作、目标与范围。跨信任边界泄露敏感信息属于 high，始终拒绝。效果不明确和授权冲突未解决时拒绝。在 `ask` 审批策略下，被拒绝调用会请求用户审批，获批后才执行；审批被拒绝或取消时 body 不执行。在 `never` 下，reviewer 的拒绝即最终结果。Reviewer 响应不合法和技术失败会以具体错误使调用失败，且从不执行。
 
-最终拒绝使用普通工具卡片。折叠行标识 Auto review；展开输出说明 body 未执行，并显示可选理由。[Web 权限包](../../client/ui-permission-presets/README.zh.md)拥有选择器交互，[工具 UI](../../client/ui-tool/README.zh.md)拥有理由展示。
+最终拒绝使用普通工具卡片。折叠行标识 Auto review；展开输出说明 body 未执行，并显示可选理由。[工具 UI](../../client/ui-tool/README.zh.md)拥有理由展示。
 
 -----
 
@@ -57,11 +57,11 @@ Auto 在每个受支持调用的 body 执行前审查一次，包括每个已开
 <details>
 <summary>实现内部机制——点击展开</summary>
 
-[`cordis.patch.yml`](cordis.patch.yml)把本包自身插入为 `auto-review` 行。[`src/index.ts`](src/index.ts)要求 approval、LLM、permission、Session 与 tools 服务，然后在同一个 effect 中安装 preset contribution 和置前的 pre-execute listener。Review 结束后，拒绝会读取 Session 的审批策略：`never` 下为最终拒绝；`ask` 下 listener 先交给后续 pre-execute listener，只有它们放行调用时才返回 tools 流水线的 `ask` 决定，因此后续的拒绝、取消或 `ask`（带自己的理由）优先。`ask` 决定携带英文审计理由，以及保留原始 reviewer 理由的本地化提示文本。[权限 owner](../../interaction/permission-presets/README.zh.md)提供当前身份和进程目录；Auto 使用 Full access 的沙箱值与 `ask` 审批策略，不改变工具定义。
+[`cordis.patch.yml`](cordis.patch.yml)把本包自身插入为 `auto-review` 行。[`src/index.ts`](src/index.ts)要求 approval、LLM、tools 与 working-directory 服务，然后在同一个 effect 中安装一个置前的 pre-execute listener。Review 结束后，拒绝会读取 Session 生效的审批策略：`never` 下为最终拒绝；否则 listener 先交给后续 pre-execute listener，只有它们放行调用时才返回 tools 流水线的 `ask` 决定，因此后续的拒绝、取消或 `ask`（带自己的理由）优先。`ask` 决定携带英文审计理由，以及保留原始 reviewer 理由的本地化提示文本。[审批服务](../../interaction/user-approval/README.zh.md)拥有拒绝所依据的策略；Auto 不改变工具定义。
 
 Reviewer 从当前 Session surface 与待执行调用重建五个分区：固定策略、仅 cwd 的环境、带来源的项目约束、过滤后带来源的历史，以及完整待审动作。原生 schema 来自最新 request header。PTC binding 冻结其 schema，经由调度器传入临时执行元数据；开始与结算事件都不序列化描述或参数 schema。主 agent 的 `system/message` 节点、assistant 正文与 reasoning、tool results 全部排除。外层评审输入是冻结的 `RequestUserInput`，不含持久身份或来源；保留历史在评审文本中仍携带原始来源。[决策记录](../../../.agents/notes/implemented/feature/2026-08-28-auto-review.zh.md)拥有权威、生命周期与 child 继承的理由。
 
-卸载时先关闭选择与 review admission，经由既有 preset writer 将存活 Auto Session 迁移到 Full access，再中止并等待在途 review 结清，最后撤回 listener 与 contribution。迁移通过 Session writer 写入 `never` 审批策略，不排入策略变更通知；模型在下一次 runtime-context 快照中看到新策略。沙箱值与持久终端在迁移中保持不变。持久 Auto Session 缺少完整 integration 时不能发布；安装后重新打开需要用户显式操作。重装只恢复选项，不把存活 Session 切回 Auto。
+卸载时先关闭 review admission，再中止并等待在途 review 结清，最后撤回 listener。admission 先关闭，因此在排水期间开始的调用会被取消而不是被审查。重新安装此层会为后续调用重新装上门禁。
 
 </details>
 
@@ -84,7 +84,7 @@ Reviewer 从当前 Session surface 与待执行调用重建五个分区：固定
 
 #### 模型看到什么
 
-Reviewer 使用最新 `request/header.config` 的 provider 与模型，并沿用 shipped adapter 默认 reasoning。固定 `REVIEW_POLICY` 替代恰好一个动作的人工审批：allow 后立即以 Full access 执行。其余四个分区只包含上文列出的保留事实。响应为一个严格 JSON text 对象，包含 `risk` 与 `decision`；deny 可附字符串 `reason`。Reasoning blocks 可以位于这唯一 text block 之前。只有 `low + allow`、`medium + allow/deny` 和 `high + deny` 合法。
+Reviewer 使用最新 `request/header.config` 的 provider 与模型，并沿用 shipped adapter 默认 reasoning。固定 `REVIEW_POLICY` 替代恰好一个动作的人工审批：allow 后立即执行，不再有后续确认。其余四个分区只包含上文列出的保留事实。响应为一个严格 JSON text 对象，包含 `risk` 与 `decision`；deny 可附字符串 `reason`。Reasoning blocks 可以位于这唯一 text block 之前。只有 `low + allow`、`medium + allow/deny` 和 `high + deny` 合法。
 
 #### Token 影响
 
@@ -112,10 +112,10 @@ Reviewer 使用最新 `request/header.config` 的 provider 与模型，并沿用
 
 <a id="known-limitations-and-deferred-work"></a>
 
-- Auto 需要开启此 Web 层；默认 Web、Headless、通用设置与新会话默认值都不包含它。
-- Auto 不提供文件沙箱。外层 `run_code` transport 及PTC 程序内直接 Node 效果不经过 inner-tool review。
+- Auto 需要组合此层；默认 Web 与 Headless 都不包含它，通用设置与新会话默认值也不提供。
+- 此门禁不做任何限制。外层 `run_code` transport 及 PTC 程序内直接 Node 效果不经过 inner-tool review。
 - 模型分类可能出错。不提供确定性工具豁免、持久 grant、可配置策略或重试层。
-- 进程内 Auto child 独立审查自身调用。进程外 child 在父委派调用获准后保留原生权限系统。
+- 进程内 child 独立审查自身调用。进程外 child 在父委派调用获准后保留原生权限系统。
 - reviewer 在带行级豁免的情况下，通过已废弃的同步 `snapshotEvents()` 读取 Session 动作历史。此前的调用、PTC start 与直接父级的初始 prompt 目前都没有投影或分页读取方，因此迁移按[同步读取决策](../../../.agents/notes/implemented/architecture/2026-09-09-deprecate-synchronous-session-event-reads.zh.md)继续延期。
 
 <a id="dev-note"></a>

@@ -25,12 +25,6 @@
     },
     {
       "path": "../../util/values"
-    },
-    {
-      "path": "../../sandbox/sandbox"
-    },
-    {
-      "path": "../../sandbox/sandbox-policy"
     }
   ]
 }

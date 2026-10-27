@@ -44,8 +44,6 @@ export interface WebhookSessionRequest {
   readonly prompt: string
   /** Agent composition mounted before publication. */
   readonly agentPreset: string
-  /** Sandbox and approval preset applied before prompt admission. */
-  readonly permissionPreset: string
   /** Optional explicit route; omission uses the complete current default, including reasoning effort. */
   readonly model?: WebhookModelSelection
 }

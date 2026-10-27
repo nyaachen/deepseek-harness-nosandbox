@@ -8,7 +8,6 @@ import type { ModelSelection } from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-agent-default-model'
 import type {} from '@deepseek-ai/dsh-agent-preset-registry'
 import { boundContextSummary, createUserMessage, errorChain, type LlmCallConfig } from '@deepseek-ai/dsh-llm'
-import type {} from '@deepseek-ai/dsh-permission-presets'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-session-title'
 import type {} from '@deepseek-ai/dsh-workspace'
@@ -21,7 +20,6 @@ interface ResolvedWebhookSessionRequest {
   readonly title: string
   readonly prompt: string
   readonly agentPreset: string
-  readonly permissionPreset: string
   readonly modelSelection: ModelSelection
   readonly agentOptions: {
     readonly provider: string
@@ -53,7 +51,6 @@ function resolveRequest(ctx: Context, input: WebhookSessionRequest): ResolvedWeb
   const title = requiredString(record, 'title')
   const prompt = requiredString(record, 'prompt')
   const agentPreset = requiredString(record, 'agentPreset')
-  const permissionPreset = requiredString(record, 'permissionPreset')
   const model = record['model']
   if (model !== undefined && (model === null || typeof model !== 'object' || Array.isArray(model))) {
     throw new TypeError('webhook Session request model must be an object')
@@ -80,7 +77,7 @@ function resolveRequest(ctx: Context, input: WebhookSessionRequest): ResolvedWeb
     }
     modelSelection = { provider, model: modelId }
   }
-  return { workspacePath, title, prompt, agentPreset, permissionPreset, modelSelection, agentOptions }
+  return { workspacePath, title, prompt, agentPreset, modelSelection, agentOptions }
 }
 
 /** Log a rollback failure without replacing the operation's original failure. */
@@ -122,7 +119,6 @@ export async function createWebhookSession(
   signal: AbortSignal,
 ): Promise<void> {
   const resolved = resolveRequest(ctx, request)
-  ctx.permissionPresets.resolve(resolved.permissionPreset)
   const preset = await ctx.agentPresets.resolve(resolved.agentPreset)
   await using presetScope = await ctx.agentPresets.acquireScope(preset.id)
   void presetScope
@@ -148,7 +144,6 @@ export async function createWebhookSession(
     await workspace.attachSession(sessionId)
     attached = true
     signal.throwIfAborted()
-    ctx.permissionPresets.set(handle.agent.session, resolved.permissionPreset)
     ctx.sessionTitle.rename(handle.agent.session, resolved.title)
     handle.agent.followup(createUserMessage({
       content: [{ type: 'text', text: resolved.prompt }],

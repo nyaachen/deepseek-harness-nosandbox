@@ -19,8 +19,6 @@ import { inlineImages, prepareImages } from '@deepseek-ai/dsh-llm-deepseek/src/i
 import { serialize } from '@deepseek-ai/dsh-llm-deepseek/src/serialize.ts'
 import { resolveRequestImageTarget } from '@deepseek-ai/dsh-llm-deepseek/src/request-pricing.ts'
 import NodePtcRuntime from '@deepseek-ai/dsh-ptc-runtime-node'
-import Sandbox from '@deepseek-ai/dsh-sandbox-local'
-import SandboxPolicy from '@deepseek-ai/dsh-sandbox-policy'
 import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import SubprocessLocal from '@deepseek-ai/dsh-subprocess-local'
@@ -67,13 +65,13 @@ it.skipIf(process.platform === 'win32')('delivers a valid PNG larger than 4 MiB 
     llm: LlmRuntime, session: SessionStore, projection: SessionProjectionRegistry,
     systemPrompt: SystemPrompt, tools: ToolRuntime, agents: AgentRegistry, agentLoop: AgentLoop,
     attachments: LocalAttachmentStore, fs: FileSystem, subprocess: SubprocessLocal,
-    sandbox: Sandbox, sandboxPolicy: SandboxPolicy, ptc: NodePtcRuntime,
+    ptc: NodePtcRuntime,
     computerUse: ComputerUseRegistry, cua: NativeProvider, workingDirectory: WorkingDirectory,
   }
   const configPath = join(root, 'cordis.yml')
   const configs: Record<string, object> = {
     tools: { mode: 'ptc' }, attachments: { dshHome: join(root, 'home') }, workingDirectory: { defaultDirectory: root },
-    fs: { cwd: root }, sandboxPolicy: { mode: 'danger-full-access', workspaceRoot: root }, cua: { helperPath, allowedApps: [{ 'id': 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'name': 'Fixture', 'executablePath': '/fixture/app' }] },
+    fs: { cwd: root }, cua: { helperPath, allowedApps: [{ 'id': 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'name': 'Fixture', 'executablePath': '/fixture/app' }] },
   }
   await writeFile(configPath, Object.keys(modules).flatMap(name => [
     `- name: 'cordis:${name}'`, ...configs[name] === undefined ? [] : [`  config: ${JSON.stringify(configs[name])}`],

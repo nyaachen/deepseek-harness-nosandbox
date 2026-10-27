@@ -17,10 +17,6 @@ import LlmRuntime, {
   type StreamChunk,
   type ToolSchema,
 } from '@deepseek-ai/dsh-llm'
-import PermissionPresetService, {
-  AUTO_PRESET,
-  type Config as PermissionConfig,
-} from '@deepseek-ai/dsh-permission-presets'
 import SessionStore, {
   SessionId,
   SessionLogOffset,
@@ -32,7 +28,6 @@ import SubagentRuntime, {
   SUBAGENT_DESCRIPTOR_VERSION,
   type SubagentStartRequest,
 } from '@deepseek-ai/dsh-subagent'
-import type {} from '@deepseek-ai/dsh-shell'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import * as ToolSubagent from '@deepseek-ai/dsh-tool-subagent'
 import ToolRuntime, {
@@ -93,12 +88,6 @@ interface PluginFiber {
   dispose(): Promise<void>
 }
 
-const PRESETS = {
-  'read-only': { sandbox: 'read-only', approval: 'ask', name: 'Read only' },
-  'workspace-write': { sandbox: 'workspace-write', approval: 'ask', name: 'Workspace write' },
-  'danger-full-access': { sandbox: 'danger-full-access', approval: 'never', name: 'Full access' },
-} satisfies NonNullable<PermissionConfig['presets']>
-
 const contexts: Context[] = []
 
 afterEach(async () => {
@@ -129,7 +118,6 @@ function reasoningDecisionChunks(text: string): StreamChunk[] {
 
 async function harness(
   script: ReviewScript[],
-  permissionConfig: NonNullable<Parameters<typeof PermissionPresetService.Config>[0]> = { presets: PRESETS, defaultPreset: 'workspace-write' },
 ): Promise<{ ctx: Context; adapter: RecordingAdapter; auto: PluginFiber }> {
   const ctx = new Context()
   provideWorkingDirectoryFixture(ctx)
@@ -139,14 +127,7 @@ async function harness(
   await ctx.plugin(SessionProjectionRegistry)
   await ctx.plugin(SystemPrompt, {})
   await ctx.plugin(ToolRuntime)
-  ctx.provide('shell', {
-    sandboxMode: 'workspace-write',
-    resolve() { throw new Error('auto-review tests do not execute shell requests') },
-    run() { throw new Error('auto-review tests do not execute shell requests') },
-    start() { throw new Error('auto-review tests do not execute shell requests') },
-  })
   await ctx.plugin(ApprovalService, { policy: 'ask' })
-  await ctx.plugin(PermissionPresetService, permissionConfig)
   const adapter = new RecordingAdapter(script)
   ctx.llm.registerAdapter(['review'], adapter)
   const auto = await ctx.plugin(AutoReview)
@@ -163,7 +144,6 @@ function agentFor(session: Session): Agent {
 
 function autoSession(ctx: Context, id: string, cwd = '/workspace'): { session: Session; agent: Agent } {
   const session = ctx.sessions.create(SessionId(id), { meta: { cwd } })
-  ctx.permissionPresets.set(session, AUTO_PRESET)
   return { session, agent: agentFor(session) }
 }
 
@@ -546,7 +526,6 @@ describe('native review request', () => {
         origin: 'subagent',
       },
     })
-    ctx.permissionPresets.set(session, AUTO_PRESET)
     setApprovalPolicy(session, 'never')
     const agent = agentFor(session)
     appendHeader(session, [{ name: 'probe', description: 'probe', parameters: { type: 'object' } }])
@@ -598,7 +577,6 @@ describe('native review request', () => {
     const incomplete = ctx.sessions.create(SessionId('child-role-incomplete'), {
       meta: { cwd: '/workspace', parentSession: parentId, origin: 'subagent' },
     })
-    ctx.permissionPresets.set(incomplete, AUTO_PRESET)
     appendHeader(incomplete, [{ name: 'probe', description: 'probe', parameters: { type: 'object' } }])
     appendUser(incomplete, 'Unverified creation-window text.', { kind: 'user' })
     const incompleteCallId = ToolCallId('child-role-incomplete-call')
@@ -1238,7 +1216,6 @@ describe('out-of-process delegation boundary', () => {
 
     const agent = await externalTestParent(ctx, process.cwd())
     const session = agent.session
-    ctx.permissionPresets.set(session, AUTO_PRESET)
     setApprovalPolicy(session, 'never')
     const schema = ctx.tools.schemas(agent).find(item => item.name === 'delegate_remote')
     if (schema === undefined) throw new Error('remote delegation tool schema is missing')
@@ -1297,9 +1274,6 @@ describe('out-of-process delegation boundary', () => {
     expect(providerRequest?.cwd).toBe(process.cwd())
     expect(providerRequest?.agentOptions).toBeUndefined()
     expect(providerRequest?.maxDepth).toBeUndefined()
-    expect(providerRequest).not.toHaveProperty('permission')
-    expect(providerRequest).not.toHaveProperty('sandboxMode')
-    expect(providerRequest).not.toHaveProperty('approvalPolicy')
   })
 })
 
@@ -1342,7 +1316,7 @@ describe('cancellation and integration teardown', () => {
   })
 
   it.each(['allow', 'deny', 'failure'] as const)(
-    'migrates live sessions to Full access and cancels a late lifecycle %s before removal',
+    'closes admission and cancels a late lifecycle %s before removal',
     async (outcome) => {
       const entered = Promise.withResolvers<undefined>()
       const release = Promise.withResolvers<undefined>()
@@ -1366,8 +1340,6 @@ describe('cancellation and integration teardown', () => {
 
       const disposal = auto.dispose()
       await until(() => adapter.requests[0]?.signal?.aborted === true)
-      expect(ctx.permissionPresets.current(session)).toBe('danger-full-access')
-      expect(ctx.permissionPresets.names).toContain(AUTO_PRESET)
 
       const afterClose = await ctx.tools.execute({
         signal: new AbortController().signal,
@@ -1388,54 +1360,51 @@ describe('cancellation and integration teardown', () => {
         isError: true,
         error: { info: { name: 'AbortError', code: TOOL_ABORTED_BEFORE_DISPATCH } },
       })
-      expect(ctx.permissionPresets.names).not.toContain(AUTO_PRESET)
     })
 
-  it('closes Auto admission before migration observers can start another review', async () => {
-    const { ctx, adapter, auto } = await harness([
-      decisionChunks('{"risk":"low","decision":"allow"}'),
-    ])
+  it('closes admission before a competing call can start another review', async () => {
+    const entered = Promise.withResolvers<undefined>()
+    const release = Promise.withResolvers<undefined>()
+    const controlled = async function* (): AsyncIterable<StreamChunk> {
+      entered.resolve(undefined)
+      await release.promise
+      yield* decisionChunks('{"risk":"low","decision":"allow"}')
+    }
+    const { ctx, adapter, auto } = await harness([controlled])
     const probe = registerProbe(ctx)
-    const first = autoSession(ctx, 'dispose-migration-first')
-    const second = autoSession(ctx, 'dispose-migration-second')
+    const first = autoSession(ctx, 'dispose-admission-first')
+    appendHeader(first.session, [{ name: 'probe', description: 'probe', parameters: { type: 'object' } }])
+    const callId = ToolCallId('dispose-admission-call')
+    appendAssistant(first.session, [{ type: 'tool-call', id: callId, name: 'probe', arguments: '{}' }])
+    appendNativeCall(first.session, callId, 'probe', '{}')
+    const pending = ctx.tools.execute({
+      signal: new AbortController().signal, callId, name: 'probe', arguments: {}, agent: first.agent,
+    })
+    await entered.promise
+
+    const disposal = auto.dispose()
+    const second = autoSession(ctx, 'dispose-admission-second')
     appendHeader(second.session, [{ name: 'probe', description: 'probe', parameters: { type: 'object' } }])
-    const callId = ToolCallId('dispose-migration-call')
-    appendAssistant(second.session, [{ type: 'tool-call', id: callId, name: 'probe', arguments: '{}' }])
-    appendNativeCall(second.session, callId, 'probe', '{}')
-    let observedPreset: string | undefined
-    let selectionFailure: unknown
-    let competingCall: ReturnType<typeof ctx.tools.execute> | undefined
-    ctx.on('session/event', (session, event) => {
-      if (session !== first.session || event.type !== 'permission/preset'
-        || event.data.preset !== 'danger-full-access') return
-      observedPreset = ctx.permissionPresets.current(second.session)
-      try {
-        ctx.permissionPresets.set(second.session, AUTO_PRESET)
-      } catch (error) {
-        selectionFailure = error
-      }
-      competingCall = ctx.tools.execute({
-        signal: new AbortController().signal,
-        callId,
-        name: 'probe',
-        arguments: {},
-        agent: second.agent,
-      })
+    const secondCallId = ToolCallId('dispose-admission-second-call')
+    appendAssistant(second.session, [{ type: 'tool-call', id: secondCallId, name: 'probe', arguments: '{}' }])
+    appendNativeCall(second.session, secondCallId, 'probe', '{}')
+    const competing = ctx.tools.execute({
+      signal: new AbortController().signal, callId: secondCallId, name: 'probe', arguments: {}, agent: second.agent,
     })
 
-    await auto.dispose()
-
-    expect(observedPreset).toBe(AUTO_PRESET)
-    expect(selectionFailure).toEqual(new Error('auto-review: integration is closing'))
-    await expect(competingCall).resolves.toMatchObject({
+    await expect(competing).resolves.toMatchObject({
       isError: true,
       error: { info: { name: 'AbortError', code: TOOL_ABORTED_BEFORE_DISPATCH } },
     })
-    expect(adapter.requests).toHaveLength(0)
+    expect(adapter.requests).toHaveLength(1)
+
+    release.resolve(undefined)
+    await expect(pending).resolves.toMatchObject({
+      isError: true,
+      error: { info: { name: 'AbortError', code: TOOL_ABORTED_BEFORE_DISPATCH } },
+    })
+    await disposal
     expect(probe.runs()).toBe(0)
-    expect(ctx.permissionPresets.current(first.session)).toBe('danger-full-access')
-    expect(ctx.permissionPresets.current(second.session)).toBe('danger-full-access')
-    expect(ctx.permissionPresets.names).not.toContain(AUTO_PRESET)
   })
 
   it('cancels an allowed review when disposal starts during a downstream guard', async () => {
@@ -1445,8 +1414,10 @@ describe('cancellation and integration teardown', () => {
       decisionChunks('{"risk":"medium","decision":"allow"}'),
     ])
     const probe = registerProbe(ctx)
+    let reviewSignal: AbortSignal | undefined
     ctx.on('tools/pre-execute', async (exec, next): Promise<PreToolDecision> => {
       if (exec.name !== 'probe') return next()
+      reviewSignal = exec.signal
       downstreamEntered.resolve(undefined)
       await releaseDownstream.promise
       return next()
@@ -1462,8 +1433,8 @@ describe('cancellation and integration teardown', () => {
     await downstreamEntered.promise
 
     const disposal = auto.dispose()
-    await until(() => ctx.permissionPresets.current(session) === 'danger-full-access')
-    expect(ctx.permissionPresets.current(session)).toBe('danger-full-access')
+    // The lifecycle abort reaches the admitted call's composed signal.
+    await until(() => reviewSignal?.aborted === true)
     releaseDownstream.resolve(undefined)
 
     await expect(pending).resolves.toMatchObject({
@@ -1501,40 +1472,42 @@ describe('cancellation and integration teardown', () => {
     await expect(auto.dispose()).resolves.toBeUndefined()
   })
 
-  it('reinstall restores Auto availability without re-enabling a migrated session', async () => {
-    const { ctx, auto } = await harness([])
-    const { session } = autoSession(ctx, 'reinstall-after-dispose')
+  it('re-arms the gate when the integration is reinstalled', async () => {
+    const { ctx, adapter, auto } = await harness([decisionChunks('{"risk":"low","decision":"allow"}')])
+    const probe = registerProbe(ctx)
+    const unreviewed = autoSession(ctx, 'reinstall-before')
+    appendHeader(unreviewed.session, [{ name: 'probe', description: 'probe', parameters: { type: 'object' } }])
+    const unreviewedCallId = ToolCallId('reinstall-before-call')
+    appendAssistant(unreviewed.session, [{ type: 'tool-call', id: unreviewedCallId, name: 'probe', arguments: '{}' }])
+    appendNativeCall(unreviewed.session, unreviewedCallId, 'probe', '{}')
 
     await auto.dispose()
-    expect(ctx.permissionPresets.current(session)).toBe('danger-full-access')
-    expect(ctx.permissionPresets.names).not.toContain(AUTO_PRESET)
+    await expect(ctx.tools.execute({
+      signal: new AbortController().signal,
+      callId: unreviewedCallId,
+      name: 'probe',
+      arguments: {},
+      agent: unreviewed.agent,
+    })).resolves.toMatchObject({ isError: false })
+    expect(adapter.requests).toHaveLength(0)
+    expect(probe.runs()).toBe(1)
 
     const reinstalled = await ctx.plugin(AutoReview)
-    expect(ctx.permissionPresets.names).toContain(AUTO_PRESET)
-    expect(ctx.permissionPresets.current(session)).toBe('danger-full-access')
+    const reviewed = autoSession(ctx, 'reinstall-after')
+    appendHeader(reviewed.session, [{ name: 'probe', description: 'probe', parameters: { type: 'object' } }])
+    const reviewedCallId = ToolCallId('reinstall-after-call')
+    appendAssistant(reviewed.session, [{ type: 'tool-call', id: reviewedCallId, name: 'probe', arguments: '{}' }])
+    appendNativeCall(reviewed.session, reviewedCallId, 'probe', '{}')
+    await expect(ctx.tools.execute({
+      signal: new AbortController().signal,
+      callId: reviewedCallId,
+      name: 'probe',
+      arguments: {},
+      agent: reviewed.agent,
+    })).resolves.toMatchObject({ isError: false })
+    expect(adapter.requests).toHaveLength(1)
+    expect(probe.runs()).toBe(2)
     await reinstalled.dispose()
-  })
-
-  it('publishes Auto without validating the preset table at load', async () => {
-    const invalid = new Context()
-    provideWorkingDirectoryFixture(invalid)
-    contexts.push(invalid)
-    await invalid.plugin(LlmRuntime)
-    await invalid.plugin(SessionStore)
-    await invalid.plugin(SessionProjectionRegistry)
-    await invalid.plugin(SystemPrompt, {})
-    await invalid.plugin(ToolRuntime)
-    invalid.provide('shell', {
-      sandboxMode: 'workspace-write',
-      resolve() { throw new Error('unused') },
-      run() { throw new Error('unused') },
-      start() { throw new Error('unused') },
-    })
-    invalid.provide('approval', { config: { policy: 'ask' } })
-    await invalid.plugin(PermissionPresetService, {})
-    const auto = await invalid.plugin(AutoReview)
-    expect(invalid.permissionPresets.names).toContain(AUTO_PRESET)
-    await auto.dispose()
   })
 })
 
@@ -1699,7 +1672,6 @@ describe('logged-fact failures', () => {
     const { ctx, adapter } = await harness([decisionChunks('{"risk":"low","decision":"allow"}')])
     const probe = registerProbe(ctx)
     const session = ctx.sessions.create(SessionId('missing-cwd'))
-    ctx.permissionPresets.set(session, AUTO_PRESET)
     appendHeader(session, [{ name: 'probe', description: 'probe', parameters: { type: 'object' } }])
     const callId = ToolCallId('missing-cwd-call')
     appendAssistant(session, [{ type: 'tool-call', id: callId, name: 'probe', arguments: '{}' }])

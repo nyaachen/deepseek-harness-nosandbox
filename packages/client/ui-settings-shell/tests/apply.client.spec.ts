@@ -56,7 +56,7 @@ describe('ui-settings-shell apply', () => {
   })
 
   it('registers the shell page while the Host serves the namespace, titled in the active locale', async () => {
-    const { ctx, slots } = await bench(['bash-sandbox', 'ui-theme'])
+    const { ctx, slots } = await bench(['bash-local', 'ui-theme'])
     declareRoot(slots)
 
     await ctx.plugin({ inject: [...inject], apply }).await()
@@ -80,18 +80,18 @@ describe('ui-settings-shell apply', () => {
     expect(slots.entries('plugins.item')).toHaveLength(0)
 
     describeSettings.mockResolvedValue({
-      ok: true, value: { writable: true, hasDocument: true, namespaces: [view('bash-sandbox', 1)] },
+      ok: true, value: { writable: true, hasDocument: true, namespaces: [view('bash-local', 1)] },
     })
-    remote.emit('settings/document-updated', ['bash-sandbox', 1])
+    remote.emit('settings/document-updated', ['bash-local', 1])
     await vi.waitFor(() => { expect(slots.entries('plugins.item')).toHaveLength(1) })
 
     describeSettings.mockResolvedValue({ ok: true, value: { writable: true, hasDocument: true, namespaces: [] } })
-    remote.emit('settings/document-updated', ['bash-sandbox', 2])
+    remote.emit('settings/document-updated', ['bash-local', 2])
     await vi.waitFor(() => { expect(slots.entries('plugins.item')).toHaveLength(0) })
   })
 
   it('binds the page to the PowerShell executor entry when that is the composed shell', async () => {
-    const { ctx, slots } = await bench(['pwsh-sandbox'])
+    const { ctx, slots } = await bench(['pwsh-local'])
     declareRoot(slots)
     await ctx.plugin({ inject: [...inject], apply }).await()
     await vi.waitFor(() => { expect(slots.entries('plugins.item')).toHaveLength(1) })
@@ -100,7 +100,7 @@ describe('ui-settings-shell apply', () => {
   })
 
   it('registers into a declaration that arrives after apply', async () => {
-    const { ctx, slots } = await bench(['bash-sandbox'])
+    const { ctx, slots } = await bench(['bash-local'])
     await ctx.plugin({ inject: [...inject], apply }).await()
 
     declareRoot(slots)
@@ -109,7 +109,7 @@ describe('ui-settings-shell apply', () => {
   })
 
   it('collapses the page on teardown', async () => {
-    const { ctx, slots } = await bench(['bash-sandbox'])
+    const { ctx, slots } = await bench(['bash-local'])
     declareRoot(slots)
     const fiber = ctx.plugin({ inject: [...inject], apply })
     await fiber.await()

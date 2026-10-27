@@ -1,12 +1,11 @@
-/** Session identity, allocation races, human execution permissions and real PTY behavior. */
+/** Session identity, allocation races, environment resolution and real PTY behavior. */
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { PassThrough } from 'node:stream'
 import { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import type { SessionEvent, SessionId } from '@deepseek-ai/dsh-session'
-import type { SandboxExecutionPolicy, SandboxMode } from '@deepseek-ai/dsh-sandbox'
+import type { SessionId } from '@deepseek-ai/dsh-session'
 import { SubprocessExecutableNotFoundError, type SubprocessRuntime, type SubprocessTerminalEnvironment, type SubprocessTerminalHandle } from '@deepseek-ai/dsh-subprocess'
 import LocalSubprocessRuntime from '@deepseek-ai/dsh-subprocess-local'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -31,12 +30,10 @@ function fixture(overrides: Partial<Config> = {}) {
   const ctx = new Context()
   roots.push(ctx)
   const effects = vi.spyOn(ctx.fiber, 'effect')
-  const sandboxPolicy = { defaultMode: 'danger-full-access', workspaceRoot: '/workspace', resolve: vi.fn((): SandboxExecutionPolicy => ({ mode: 'danger-full-access', workspaceRoot: '/workspace' })) }
   const workingDirectory = {
     get: vi.fn<(session: Agent['session']) => string>(session => session.header.cwd ?? '/workspace'),
     ensure: vi.fn<(agent: Agent, signal?: AbortSignal) => Promise<string>>(async agent => agent.session.header.cwd ?? '/workspace'),
   }
-  ctx.provide('sandboxPolicy', sandboxPolicy as never)
   ctx.provide('workingDirectory', workingDirectory as never)
   const output = new PassThrough()
   const done = Promise.withResolvers<{ exitCode: number; signal: null }>()
@@ -55,7 +52,7 @@ function fixture(overrides: Partial<Config> = {}) {
     if (result?.type !== 'return' || typeof result.value !== 'function') throw new Error(`Missing effect: ${label}`)
     return result.value()
   }
-  return { ctx, agent: owner(ctx), controller, subprocess, handle, sandboxPolicy, workingDirectory, disposeEffect }
+  return { ctx, agent: owner(ctx), controller, subprocess, handle, workingDirectory, disposeEffect }
 }
 
 describe('TerminalController', () => {
@@ -99,20 +96,15 @@ describe('TerminalController', () => {
   })
 
   it('honors cancellation before reading environment limits', () => {
-    const { controller, agent, subprocess, sandboxPolicy } = fixture()
+    const { controller, agent, subprocess } = fixture()
     const abort = new AbortController()
     abort.abort(new Error('request cancelled'))
     expect(() => controller.environment(agent, abort.signal)).toThrow('request cancelled')
     expect(subprocess.terminalEnvironment).not.toHaveBeenCalled()
-    expect(sandboxPolicy.resolve).not.toHaveBeenCalled()
   })
 
-  it('uses the current directory for new user terminals while retaining earlier directories and permissions', async () => {
-    const { ctx, controller, agent, subprocess, sandboxPolicy, workingDirectory } = fixture()
-    const policy: SandboxExecutionPolicy = { mode: 'workspace-write', workspaceRoot: '/workspace', sessionId: agent.id }
-    sandboxPolicy.resolve.mockReturnValue(policy)
-    const confine = vi.fn(async (argv: readonly string[], _policy: SandboxExecutionPolicy) => ({ argv: [...argv] }))
-    ctx.provide('sandbox', { confine } as never)
+  it('uses the current directory for new user terminals while retaining earlier directories', async () => {
+    const { controller, agent, subprocess, workingDirectory } = fixture()
     const first = await controller.create(agent, request, signal())
     workingDirectory.get.mockReturnValue('/workspace/selected')
     workingDirectory.ensure.mockResolvedValue('/workspace/selected')
@@ -126,8 +118,6 @@ describe('TerminalController', () => {
     expect(second.cwd).toBe('/workspace/selected')
     expect(subprocess.spawnTerminal).toHaveBeenNthCalledWith(1, expect.objectContaining({ cwd: '/workspace' }))
     expect(subprocess.spawnTerminal).toHaveBeenNthCalledWith(2, expect.objectContaining({ cwd: '/workspace/selected' }))
-    expect(confine).not.toHaveBeenCalled()
-    expect(sandboxPolicy.resolve).not.toHaveBeenCalled()
     expect(controller.list(agent.id).map(terminal => terminal.cwd)).toEqual(['/workspace', '/workspace/selected'])
   })
 
@@ -361,18 +351,13 @@ describe('TerminalController', () => {
     expect(controller.list(agent.id)).toEqual([])
   })
 
-  it.each(['read-only', 'workspace-write', 'danger-full-access'] as const)('starts a user shell without confinement under %s Agent permissions', async (mode) => {
-    const { controller, agent, ctx, sandboxPolicy, subprocess } = fixture()
-    sandboxPolicy.resolve.mockReturnValue({ mode, workspaceRoot: '/workspace', sessionId: agent.id })
-    const confine = vi.fn((argv: readonly string[]) => ({ argv: ['sandbox-runner', ...argv] }))
-    ctx.provide('sandbox', { confine } as never)
+  it('starts a user shell with the configured argv and managed session env', async () => {
+    const { controller, agent, subprocess } = fixture()
     await controller.create(agent, request, signal())
-    expect(confine).not.toHaveBeenCalled()
-    expect(sandboxPolicy.resolve).not.toHaveBeenCalled()
     expect(subprocess.spawnTerminal).toHaveBeenCalledWith(expect.objectContaining({ argv: ['/bin/bash', '--noprofile', '--norc', '-i'], env: { DSH_SESSION_ID: agent.id }, graceMs: 100 }))
   })
 
-  it('uses the Session working directory without requiring a sandbox provider', async () => {
+  it('uses the Session working directory', async () => {
     const { controller, ctx, subprocess } = fixture()
     const agent = owner(ctx, 'workspace-session', '/another-workspace')
     expect(controller.environment(agent, signal())).toMatchObject({ cwd: '/another-workspace' })
@@ -380,23 +365,24 @@ describe('TerminalController', () => {
     expect(subprocess.spawnTerminal).toHaveBeenCalledWith(expect.objectContaining({ cwd: '/another-workspace' }))
   })
 
-  it.each(['subprocess', 'sandboxPolicy', 'workingDirectory'] as const)('fails clearly when the Session lacks %s', (missing) => {
-    const { controller, subprocess, sandboxPolicy, workingDirectory } = fixture()
+  it.each(['subprocess', 'workingDirectory'] as const)('fails clearly when the Session lacks %s', (missing) => {
+    const { controller, subprocess, workingDirectory } = fixture()
     const isolated = new Context()
     roots.push(isolated)
     if (missing !== 'subprocess') isolated.provide('subprocess', subprocess as never)
-    if (missing !== 'sandboxPolicy') isolated.provide('sandboxPolicy', sandboxPolicy as never)
     if (missing !== 'workingDirectory') isolated.provide('workingDirectory', workingDirectory as never)
     expect(() => controller.environment(owner(isolated), signal())).toThrow(missing === 'workingDirectory'
-      ? 'requires a working-directory provider' : 'requires subprocess and sandbox policy providers')
+      ? 'requires a working-directory provider' : 'requires a subprocess provider')
   })
 
-  it('allows Agent sandbox-mode changes while retaining the same user terminal', async () => {
-    const { controller, agent, ctx, subprocess, handle } = fixture()
-    const mode = (mode: SandboxMode): void => { ctx.emit('session/event', agent.session, { type: 'sandbox/mode', data: { mode } } as SessionEvent) }
+  it('retains the same user terminal while the Session log records an event', async () => {
+    const { controller, agent, subprocess, handle } = fixture()
+    const title = (title: string): void => {
+      agent.session.append('session/title', { title, messageSeqs: [], source: { kind: 'fallback' } })
+    }
     await controller.create(agent, request, signal())
-    for (const value of ['read-only', 'workspace-write', 'danger-full-access'] as const) {
-      expect(() => { mode(value) }).not.toThrow()
+    for (const value of ['first title', 'second title']) {
+      expect(() => { title(value) }).not.toThrow()
       expect(controller.list(agent.id)).toMatchObject([{ id, state: 'running' }])
     }
     expect(subprocess.spawnTerminal).toHaveBeenCalledOnce()

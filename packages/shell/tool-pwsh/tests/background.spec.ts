@@ -66,7 +66,6 @@ class FakePwsh extends ShellExecutor {
       stdoutMaxBytes: request.stdoutMaxBytes ?? 64_000,
       ...request.signal ? { signal: request.signal } : {},
       ...request.dshEnv !== undefined ? { dshEnv: request.dshEnv } : {},
-      sandboxPolicy: request.sandboxPolicy,
     }
   }
 

@@ -9,7 +9,7 @@ import { execa } from 'execa'
 import yaml from 'js-yaml'
 import { expect, onTestFinished } from 'vitest'
 import { pnpmCommand } from '../../../../scripts/release/process.ts'
-import { packedWorkspaceClosure, type WorkspacePackage } from '../../../../packages/sandbox/sandbox-local/tests/packed-workspace-closure.ts'
+import { packedWorkspaceClosure, type WorkspacePackage } from './packed-workspace-closure.ts'
 
 const root = fileURLToPath(new URL('../../../..', import.meta.url))
 

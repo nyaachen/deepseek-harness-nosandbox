@@ -1,5 +1,5 @@
 /** Test-only IPC assertions over real Creator presets and profile management. */
-export const inject = ['agents', 'agentPresets', 'tools', 'pluginManager', 'permissionPresets']
+export const inject = ['agents', 'agentPresets', 'tools', 'pluginManager']
 
 export function apply(ctx, config) {
   const receive = message => {
@@ -32,7 +32,6 @@ export function apply(ctx, config) {
       const before = names(first)
       const manage = args => ctx.tools.execute({ name: 'plugin_manager', arguments: args, agent: first,
         callId: `${phase}-manage`, signal: new AbortController().signal })
-      ctx.permissionPresets.set(first.session, 'workspace-write')
       first.session.append('turn/start', { turn: 1 })
       activeSession = first.session
       const denied = await manage({ action: 'install_bundle', target: config.bundle })
@@ -49,7 +48,7 @@ export function apply(ctx, config) {
         callId: `${phase}-ping`, signal: new AbortController().signal })
       const removed = phase === 'restart'
         ? JSON.parse((await manage({ action: 'remove_bundle', target: '@test/creator-mcp' })).value) : undefined
-      return { approvals, permission: ctx.permissionPresets.current(first.session), before, denied, afterDenied, bundlesAfterDenied, result, after, other, ping, removed, remaining: names(first) }
+      return { approvals, before, denied, afterDenied, bundlesAfterDenied, result, after, other, ping, removed, remaining: names(first) }
     } finally {
       disposeApproval()
       activeSession?.append('turn/end', { turn: 1, reason: { kind: 'completed' } })

@@ -1,0 +1,12 @@
+{
+  "sessionFiles": 145,
+  "sessionsAdmitted": 143,
+  "sessionsWithRetiredSandboxMode": 143,
+  "retiredSandboxModeRecords": 153,
+  "sessionsWithRetiredPermissionPreset": 72,
+  "failures": [],
+  "legacyGenerationFiles": 2,
+  "legacyGenerationVersions": [
+    0
+  ]
+}

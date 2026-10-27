@@ -33,9 +33,6 @@
       "path": "../../subagent/subagent"
     },
     {
-      "path": "../../interaction/permission-presets"
-    },
-    {
       "path": "../../core/tools"
     },
     {

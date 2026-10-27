@@ -25,9 +25,9 @@ kind: "package-reference"
 <a id="use-this-package"></a>
 ## 使用此包
 
-Web bundle 将此包与 subprocess provider、working-directory 服务、sandbox policy 和 Typert Gateway 一起挂载。`remote.terminal` 提供 `environment`、`shells`、`list`、`create`、`retain`、`attach`、`rename` 和 `close`；每个操作均按 Session 标识限定范围。列表直接读取 Host 保留的终端，因此查看离线 Session 不会激活 Agent，也不会产生恢复错误。
+Web bundle 将此包与 subprocess provider、working-directory 服务和 Typert Gateway 一起挂载。`remote.terminal` 提供 `environment`、`shells`、`list`、`create`、`retain`、`attach`、`rename` 和 `close`；每个操作均按 Session 标识限定范围。列表直接读取 Host 保留的终端，因此查看离线 Session 不会激活 Agent，也不会产生恢复错误。
 
-Shell 探测结果首先列出执行环境声明的默认 shell。仅当 provider 未声明默认值时，才在 POSIX 使用 `/bin/sh`，在 Windows 使用 `cmd.exe`。可选的 `shell` profile 通过可执行路径 `path`、显示名称 `name` 和参数 `args`（默认 `[]`）覆盖这一选择。选择器还会通过执行 provider 探测 `shellCandidates`，并省略确定未找到的候选。同一可执行文件名（不区分大小写，忽略 `.exe`）只列出最早的一项，因为 PATH 查找可能经由其他目录找到默认 shell，例如 merged-`/usr` 系统上 `/bin/bash` 对应的 `/usr/bin/bash`。创建请求接受探测返回的 `shellPath` 并再次验证；解析或传输失败会直接报告，不启动其他 shell。环境查询读取当前目录和限制，不校验文件系统或解析 shell，因此目录或默认 shell 不可用时仍可重新连接已有进程。POSIX 自动 profile 以交互模式启动，PowerShell 使用 `-NoLogo`，补全和启动配置仍由 shell 提供。新终端启动前通过[工作目录服务](../../session/working-directory/README.zh.md)校验当前目录，并采用该服务的恢复行为。已有终端保留其进程目录。用户终端使用执行环境中系统用户的权限，独立于 Agent 的沙箱模式和审批策略。操作系统和容器的限制仍然生效；DSH 不提升用户权限。Subprocess provider 继续清除环境中的凭据变量。
+Shell 探测结果首先列出执行环境声明的默认 shell。仅当 provider 未声明默认值时，才在 POSIX 使用 `/bin/sh`，在 Windows 使用 `cmd.exe`。可选的 `shell` profile 通过可执行路径 `path`、显示名称 `name` 和参数 `args`（默认 `[]`）覆盖这一选择。选择器还会通过执行 provider 探测 `shellCandidates`，并省略确定未找到的候选。同一可执行文件名（不区分大小写，忽略 `.exe`）只列出最早的一项，因为 PATH 查找可能经由其他目录找到默认 shell，例如 merged-`/usr` 系统上 `/bin/bash` 对应的 `/usr/bin/bash`。创建请求接受探测返回的 `shellPath` 并再次验证；解析或传输失败会直接报告，不启动其他 shell。环境查询读取当前目录和限制，不校验文件系统或解析 shell，因此目录或默认 shell 不可用时仍可重新连接已有进程。POSIX 自动 profile 以交互模式启动，PowerShell 使用 `-NoLogo`，补全和启动配置仍由 shell 提供。新终端启动前通过[工作目录服务](../../session/working-directory/README.zh.md)校验当前目录，并采用该服务的恢复行为。已有终端保留其进程目录。用户终端使用执行环境中系统用户的权限，独立于 Agent 的审批策略。操作系统和容器的限制仍然生效；DSH 不提升用户权限。Subprocess provider 继续清除环境中的凭据变量。
 
 | 配置 | 默认值 | 含义 |
 |---|---|---|
@@ -53,7 +53,7 @@ Shell 探测结果首先列出执行环境声明的默认 shell。仅当 provide
 
 Host 通过 `ctx.subprocess.spawnTerminal` 创建 `TERM=xterm-256color` 的终端，不启动桌面终端应用。流式 UTF-8 解码保留跨块字符和开头的 BOM，并在 EOF 将不完整的尾部字节替换为替代字符。双工 `attach` Remote 流通过 Gateway mux 传输输出和有序的 `write`/`resize` 命令。每条命令使用附件内连续递增的序号；`ack` 确认提供者已接受操作，或报告控制权拒绝。快照和状态帧携带接收附件的 `writable` 标记。Headless xterm 和序列化 addon 在此前输出写入后生成初始屏幕，后续增量携带单调序号。过慢的订阅者明确失败；重新连接恢复当前屏幕。
 
-最新连接持有输入和尺寸控制权。断开连接只释放输入权，不结束进程。显式关闭等待进程清理和最后输出；清理失败时保留资源以便重试。Session 记住已关闭的标识并拒绝迟到或重复的创建请求，包括关闭到达时仍在进行的创建。新终端使用新标识。取消创建且清理失败时，已分配的进程仍有所有者。Session owner 和 controller 卸载也会终止所拥有的进程。改变 Session 的沙箱模式时，用户终端继续以原有权限运行。控制权转移或进程退出后被拒绝的输入和尺寸请求保留输出连接并禁用输入，不重发被拒绝的输入。提供者完成时即禁用输入，无须等待输出排空；迟到的输入失败不能丢弃已正常结束的订阅者所保留的尾部帧。
+最新连接持有输入和尺寸控制权。断开连接只释放输入权，不结束进程。显式关闭等待进程清理和最后输出；清理失败时保留资源以便重试。Session 记住已关闭的标识并拒绝迟到或重复的创建请求，包括关闭到达时仍在进行的创建。新终端使用新标识。取消创建且清理失败时，已分配的进程仍有所有者。Session owner 和 controller 卸载也会终止所拥有的进程。控制权转移或进程退出后被拒绝的输入和尺寸请求保留输出连接并禁用输入，不重发被拒绝的输入。提供者完成时即禁用输入，无须等待输出排空；迟到的输入失败不能丢弃已正常结束的订阅者所保留的尾部帧。
 
 初始快照公布载体的完整帧 `inputWindow`；没有 inbox 限额的进程内载体省略该字段。Client 对输入和尺寸调整都计入 JSON 转义、命令字段及载体封装的开销。未确认帧占满窗口时，命令在本地等待；提供者确认后释放额度。`maxInputBytes` 限制原始 UTF-8 输入，`maxBufferedBytes` 限制全部排队及未确认的编码输入帧。单帧无法容纳于载体窗口或 Client 缓存耗尽时，报告 `inputFull` 并取消附件，不重放排队命令。
 

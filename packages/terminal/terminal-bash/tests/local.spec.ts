@@ -10,9 +10,6 @@ import AgentRegistry from '@deepseek-ai/dsh-agent'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import TerminalSessionService from '@deepseek-ai/dsh-terminal'
 import type { TerminalSendOperation } from '@deepseek-ai/dsh-terminal'
-import SandboxProvider from '@deepseek-ai/dsh-sandbox'
-import type { ConfinedArgv, SandboxPolicy } from '@deepseek-ai/dsh-sandbox'
-import SandboxPolicyService from '@deepseek-ai/dsh-sandbox-policy'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import LocalSubprocessRuntime from '@deepseek-ai/dsh-subprocess-local'
 import { resolvePwshPath } from '@deepseek-ai/dsh-pwsh-local/src/resolve.ts'
@@ -25,15 +22,6 @@ afterEach(async () => {
   for (const ctx of contexts.splice(0)) await ctx.fiber.dispose()
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true })
 })
-
-class PassthroughSandbox extends SandboxProvider {
-  calls: { argv: readonly string[]; policy: SandboxPolicy }[] = []
-
-  async confine(argv: readonly string[], policy: SandboxPolicy): Promise<ConfinedArgv> {
-    this.calls.push({ argv, policy })
-    return { argv: [...argv], enforcement: 'full', denialSignatures: [], runnerFailureRules: [] }
-  }
-}
 
 function stubAgent(ctx: Context, rawId: string): Agent {
   const id = SessionId(rawId)
@@ -52,7 +40,6 @@ function stubAgent(ctx: Context, rawId: string): Agent {
 }
 
 async function harness(
-  mode: 'danger-full-access' | 'workspace-write',
   timing: { idleSilenceMs?: number; handoffGraceMs?: number; timeoutMs?: number } = {},
   dialect: 'bash' | 'pwsh' = 'bash',
 ) {
@@ -63,9 +50,7 @@ async function harness(
   contexts.push(ctx)
   await ctx.plugin(AgentRegistry)
   await ctx.plugin(TerminalSessionService)
-  await ctx.plugin(PassthroughSandbox)
   await ctx.plugin(SessionProjectionRegistry)
-  await ctx.plugin(SandboxPolicyService, { mode, workspaceRoot: root })
   await ctx.plugin(LocalSubprocessRuntime)
   const fiber = await ctx.plugin(ptyLocal, {
     shellDialect: dialect,
@@ -79,9 +64,9 @@ async function harness(
     scrollbackMaxBytes: 32_768,
     maxReadBytes: 16_384,
   })
-  const agent = stubAgent(ctx, `agent-${mode}`)
+  const agent = stubAgent(ctx, 'agent')
   await ctx.agents.register(agent)
-  return { ctx, root, agent, fiber, sandbox: ctx.sandbox as PassthroughSandbox }
+  return { ctx, root, agent, fiber }
 }
 
 // TerminalSendOperation.append drops output once the operation settles, so this only
@@ -141,7 +126,7 @@ describe.skipIf(process.platform === 'win32')('terminal-bash real shell', () => 
     const previous = process.env.DSH_TEST_SECRET
     process.env.DSH_TEST_SECRET = 'must-not-leak'
     try {
-      const { ctx, root, agent } = await harness('danger-full-access')
+      const { ctx, root, agent } = await harness()
       const created = await ctx.terminals.spawn(agent, { type: 'shell', name: 'main', cwd: root })
       expect(created.motd).toContain('dsh> ')
 
@@ -163,7 +148,7 @@ describe.skipIf(process.platform === 'win32')('terminal-bash real shell', () => 
     // The silence tier is pushed beyond every assertion below, so each settle
     // proves prompt-based readiness survives the override rather than the
     // inferred_idle fallback absorbing a broken prompt.
-    const { ctx, agent } = await harness('danger-full-access', {
+    const { ctx, agent } = await harness({
       idleSilenceMs: 5_000,
       timeoutMs: 8_000,
     })
@@ -180,7 +165,7 @@ describe.skipIf(process.platform === 'win32')('terminal-bash real shell', () => 
   }, 20_000)
 
   it.skipIf(process.platform !== 'linux')('recognizes a foreground read opened through /dev/tty', async () => {
-    const { ctx, root, agent } = await harness('danger-full-access', {
+    const { ctx, root, agent } = await harness({
       idleSilenceMs: 5_000,
       timeoutMs: 8_000,
     })
@@ -204,13 +189,9 @@ describe.skipIf(process.platform === 'win32')('terminal-bash real shell', () => 
     await ctx.terminals.kill(agent, created.sessionId)
   }, 20_000)
 
-  it('wraps the exact shell argv under confined policy and unregisters on reload', async () => {
-    const { ctx, root, agent, fiber, sandbox } = await harness('workspace-write')
+  it('unregisters the backend on reload while retaining live sessions', async () => {
+    const { ctx, agent, fiber } = await harness()
     const created = await ctx.terminals.spawn(agent, { type: 'shell' })
-    expect(sandbox.calls).toEqual([{
-      argv: ['/bin/bash', '--noprofile', '--norc', '-i'],
-      policy: { mode: 'workspace-write', workspaceRoot: root, sessionId: 'agent-workspace-write' },
-    }])
     await fiber.dispose()
     expect(ctx.terminals.listBackends()).toEqual([])
     expect(ctx.terminals.list(agent)).toHaveLength(1)
@@ -218,7 +199,7 @@ describe.skipIf(process.platform === 'win32')('terminal-bash real shell', () => 
   }, 10_000)
 
   it('signals a foreground command and kills a TERM-ignoring background descendant', async () => {
-    const { ctx, agent } = await harness('danger-full-access')
+    const { ctx, agent } = await harness()
     const created = await ctx.terminals.spawn(agent, { type: 'shell' })
 
     const foreground = ctx.terminals.startSend(agent, created.sessionId, { text: 'sleep 60', submit: true })
@@ -241,7 +222,7 @@ describe.skipIf(process.platform === 'win32')('terminal-bash real shell', () => 
   }, 10_000)
 
   it('quiesces a disowned same-session descendant after the shell exits naturally', async () => {
-    const { ctx, root, agent } = await harness('danger-full-access')
+    const { ctx, root, agent } = await harness()
     const created = await ctx.terminals.spawn(agent, { type: 'shell' })
     const pidFile = join(root, 'disowned.pid')
     let pid: number | undefined
@@ -282,7 +263,7 @@ describe.skipIf(process.platform === 'win32')('terminal-bash real shell', () => 
   }, 10_000)
 
   it('cancels a slow-starting raw-mode foreground process with a real SIGINT', async () => {
-    const { ctx, agent } = await harness('danger-full-access', {
+    const { ctx, agent } = await harness({
       idleSilenceMs: 10_000,
       timeoutMs: 15_000,
     })
@@ -326,7 +307,7 @@ describe.skipIf(!hasPwsh)('terminal-bash pwsh real shell', () => {
     const previous = process.env.DSH_TEST_SECRET
     process.env.DSH_TEST_SECRET = 'must-not-leak'
     try {
-      const { ctx, root, agent } = await harness('danger-full-access', {
+      const { ctx, root, agent } = await harness({
         idleSilenceMs: 300,
         handoffGraceMs: 300,
         timeoutMs: 8_000,
@@ -372,7 +353,7 @@ describe.skipIf(!hasPwsh)('terminal-bash pwsh real shell', () => {
   }, 30_000)
 
   it('pins UTF-8 output encoding so non-ASCII output survives the byte decode', async () => {
-    const { ctx, root, agent } = await harness('danger-full-access', {
+    const { ctx, root, agent } = await harness({
       idleSilenceMs: 300,
       handoffGraceMs: 300,
       timeoutMs: 8_000,

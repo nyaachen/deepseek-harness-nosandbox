@@ -1,0 +1,51 @@
+[
+  {
+    "name": "no ctx.sandbox service",
+    "passed": true
+  },
+  {
+    "name": "no ctx.sandboxPolicy service",
+    "passed": true
+  },
+  {
+    "name": "file create",
+    "passed": true,
+    "detail": "version=3397150250:1407374887445418:11:1792724296299011700:1792724296301010900"
+  },
+  {
+    "name": "file read back",
+    "passed": true
+  },
+  {
+    "name": "file edit with version guard",
+    "passed": true,
+    "detail": "version=3397150250:1407374887445419:12:1792724296322831600:1792724296328809800"
+  },
+  {
+    "name": "stale version rejected (anti-overwrite preserved)",
+    "passed": true
+  },
+  {
+    "name": "command execution",
+    "passed": true,
+    "detail": "exit=0"
+  },
+  {
+    "name": "timeout classification",
+    "passed": true,
+    "detail": "timedOut=true"
+  },
+  {
+    "name": "cancellation classification",
+    "passed": true,
+    "detail": "aborted=true"
+  },
+  {
+    "name": "background process output",
+    "passed": true
+  },
+  {
+    "name": "nested file creation",
+    "passed": true
+  }
+]

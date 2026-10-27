@@ -21,12 +21,10 @@ describe.skipIf(!built)('built lib real load path (plain node)', () => {
       const { Context } = await import('@deepseek-ai/cordis')
       const { NodePtcRuntime } = await import('@deepseek-ai/dsh-ptc-runtime-node')
       const ctx = new Context()
-      for (const name of ['session-projection', 'fs-local', 'subprocess-local', 'sandbox-local']) {
+      for (const name of ['session-projection', 'fs-local', 'subprocess-local']) {
         const plugin = await import('@deepseek-ai/dsh-' + name)
         await ctx.plugin(plugin.default, {})
       }
-      const { default: SandboxPolicy } = await import('@deepseek-ai/dsh-sandbox-policy')
-      await ctx.plugin(SandboxPolicy, { mode: 'read-only' })
       await ctx.plugin(NodePtcRuntime, {})
       const result = await ctx.ptcRuntime.run(ctx.ptcRuntime.resolve({
         program: 'const doubled: number = await tools.double({ n: 21 }); console.log("halfway", doubled); let failure; try { await tools.fail({}) } catch (error) { failure = { typed: error instanceof ToolCallError, name: error.name, toolName: error.toolName, message: error.message } } return { doubled, failure };',

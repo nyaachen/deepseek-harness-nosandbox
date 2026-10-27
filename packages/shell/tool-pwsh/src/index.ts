@@ -8,12 +8,8 @@
  * `run_in_background` execution (with a job registry composed, every call
  * registers its process with `ctx.jobs` as it starts, and a foreground call
  * waits on its job until the timeout passes), the managed `DSH_*` environment through the
- * shared `shell-env` registry, the per-call sandbox policy resolution (the
- * calling session's mode and cwd travel to the confining executor), the
- * sandbox-denial rendering with the same-turn escalation surface
- * (`sandbox_permissions` + `justification` resolved through
- * `ctx.approval`), and the bash marker/truncation rendering story. UI
- * presentation mirrors the bash tool's too: a completed foreground call is
+ * shared `shell-env` registry, and the bash marker/truncation rendering story.
+ * UI presentation mirrors the bash tool's too: a completed foreground call is
  * a terminal card with the parsed exit-status pill, using the shared
  * exit-status parse from `@deepseek-ai/dsh-shell`.
  *
@@ -30,10 +26,6 @@ import type { GenericCallView, TerminalCallView, ToolDefinition, ToolExecution, 
 import { HarnessError } from '@deepseek-ai/dsh-llm'
 import type { JobId, JobRegistry, JobView } from '@deepseek-ai/dsh-jobs'
 import type {} from '@deepseek-ai/dsh-shell-env'
-import type {} from '@deepseek-ai/dsh-user-approval'
-import type { SandboxExecutionPolicy, SandboxMode } from '@deepseek-ai/dsh-sandbox'
-import { ESCALATION_TARGETS, approveEscalation, sandboxPermissionsDescription, validateEscalationArgs } from '@deepseek-ai/dsh-sandbox'
-import type { SandboxPolicyService } from '@deepseek-ai/dsh-sandbox-policy'
 import type { ShellExecRequest, ShellExecSpec, ShellExecution, ShellRunResult } from '@deepseek-ai/dsh-shell'
 import { parseExitStatus } from '@deepseek-ai/dsh-shell'
 import { processJob, processOutcome, processSources, ringDelta } from './background.ts'
@@ -83,8 +75,6 @@ interface PwshToolArgs {
   timeoutMs?: number
   workdir?: string
   run_in_background?: boolean
-  sandbox_permissions?: string
-  justification?: string
 }
 
 /** The canonical foreground result of one pwsh call (the `output.schema` value shape). */
@@ -100,7 +90,6 @@ interface PwshForegroundResult {
   timeoutMs: number
   stdout: { text: string; truncated: boolean; spillPath?: string }
   stderr: { text: string; truncated: boolean; spillPath?: string }
-  sandbox?: { mode: string; denied: boolean; enforcement?: string; runnerFailed?: boolean }
 }
 
 /* jscpd:ignore-start -- minimal mirror of dsh-tool-bash's validation and execute plumbing (Agent Note). */
@@ -114,14 +103,11 @@ function validatePwshArgs(args: PwshToolArgs): void {
   if (args.timeoutMs !== undefined && (!Number.isFinite(args.timeoutMs) || args.timeoutMs <= 0)) {
     throw new Error(`invalid timeoutMs: expected a positive number, got ${JSON.stringify(args.timeoutMs)}`)
   }
-  // The escalation pairing (sandbox_permissions ⇔ justification, non-empty) is
-  // the shared rule both enforcing families validate identically.
-  validateEscalationArgs(args.sandbox_permissions, args.justification)
 }
 /* jscpd:ignore-end */
 
-function pwshDescription(windowsSandbox: boolean): string {
-  const base = 'Execute a PowerShell command (`pwsh -Command`) and return its stdout/stderr. '
+function pwshDescription(): string {
+  return 'Execute a PowerShell command (`pwsh -Command`) and return its stdout/stderr. '
     + 'Each call runs in a fresh pwsh process; pass `workdir` instead of using `cd`. Paths use native Windows form (`C:\\...`); read environment '
     + 'variables with `$env:NAME`. '
     + 'Managed `$env:DSH_*` variables expose current harness environment facts. '
@@ -130,24 +116,7 @@ function pwshDescription(windowsSandbox: boolean): string {
     + 'Provide `description` before `command` in the arguments. '
     + 'Before any delete or move, verify that the resolved absolute target path is the intended one; never run it against a computed path you have not checked. '
     + 'Do not assign to automatic variables such as `$HOME`; variable names are case-insensitive, so `$home` is the same read-only variable. '
-    + 'Commands may run under a file sandbox; a blocked file operation is reported as `[sandbox: file access denied under <mode> mode]`, a policy denial: do not retry another way.'
-  if (!windowsSandbox) return base
-  // The language-mode and named-pipe contracts below are Windows-restricted-token
-  // behavior, but the gate is 'any confining executor is mounted'
-  // (escalation fields advertised). Every shipped composition pairing tool-pwsh
-  // with a confining executor is win32-only, so the gate is equivalent. A POSIX
-  // pwsh-sandbox composition must gate both sentences on the platform instead
-  // (tracked in the pwsh-tool-and-executor Agent Note).
-  return base + ' Under the Windows sandbox, read-only pwsh runs in PowerShell ConstrainedLanguage mode, while '
-    + 'workspace-write stays in FullLanguage unless host policy says otherwise. In read-only, prefer cmdlets and core types (`[string]`, `[datetime]`, `[regex]`, `[guid]`); '
-    + '.NET static calls (`[System.IO.*]::`, `[math]::`), `Add-Type`, COM objects, and reflection fail '
-    + 'with "only core types" errors. `-f` formatting, property access, and core cmdlets work. '
-    + 'In both confined modes, programs cannot open named pipes, so a command that captures another '
-    + 'program\'s output through piped stdio (Node.js `child_process.spawn`/`exec` with the default '
-    + '`stdio: \'pipe\'`) fails with EPERM, while `stdio: \'inherit\'` and `stdio: \'ignore\'` spawns '
-    + 'work and PowerShell\'s own pipelines are unaffected. That EPERM is the documented boundary: '
-    + 'do not retry the command another way — escalate the exact command once or restructure it to '
-    + 'avoid capturing output.'
+    + 'Commands run with your own file access; nothing is filtered or confined.'
 }
 
 /** Resolve a relative per-call override against the Session's current directory. */
@@ -177,14 +146,6 @@ function canonicalPwshResult(result: ShellRunResult, cwd: string): PwshForegroun
     /* jscpd:ignore-start -- the canonical projection and background-handle shape mirror dsh-tool-bash's by design (Agent Note). */
     stdout: output(result.stdout),
     stderr: output(result.stderr),
-    ...result.sandbox !== undefined ? {
-      sandbox: {
-        mode: result.sandbox.mode,
-        denied: result.sandbox.denied,
-        ...result.sandbox.enforcement !== undefined ? { enforcement: result.sandbox.enforcement } : {},
-        ...result.sandbox.runnerFailed !== undefined ? { runnerFailed: result.sandbox.runnerFailed } : {},
-      },
-    } : {},
   }
 }
 
@@ -216,51 +177,6 @@ export function apply(ctx: Context, config: Config = {}): void {
   // Keeping a timed-out command needs the whole background surface: the job
   // tools to collect and stop it, and the registry itself at execution time.
   const promoteOnTimeout = (config.promoteOnTimeout ?? true) && backgroundEnabled
-  const defaultMode = ctx.shell.sandboxMode
-  const escalationModes: readonly SandboxMode[] = defaultMode === undefined ? [] : ESCALATION_TARGETS
-  const sandboxPolicy: SandboxPolicyService | undefined = defaultMode === undefined ? undefined : ctx.get('sandboxPolicy')
-  if (defaultMode !== undefined && sandboxPolicy === undefined) {
-    throw new Error('tool-pwsh: the mounted bash executor confines but ctx.sandboxPolicy is missing')
-  }
-  /* jscpd:ignore-end */
-  /** Resolve the complete standing policy for this call when a confining executor is mounted. */
-  const resolveSandboxPolicy = (exec: ToolExecution): SandboxExecutionPolicy | undefined =>
-    sandboxPolicy?.resolve(exec.agent === undefined ? {} : { session: exec.agent.session })
-
-  /* jscpd:ignore-start -- deliberate mirror of dsh-tool-bash's escalation resolver (pwsh-tool-and-executor Agent Note). */
-  /**
-   * Resolve a sandbox-escalation request through `ctx.approval` BEFORE
-   * anything executes, delegating the shared fail-closed sequence (strict
-   * widening, channel resolution, outcome mapping) to
-   * {@link approveEscalation}. This tool contributes only the composition
-   * guard (the fields are unadvertised without a sandboxing executor, yet
-   * schema validation checks advertised keys only, so an unadvertised
-   * `sandbox_permissions` still reaches execute) and the approval
-   * ingredients. The shared policy resolver is required whenever the
-   * executor advertises confinement, so a split composition fails at
-   * tool-plugin load.
-   */
-  const approvePwshEscalation = (
-    mode: string,
-    justification: string,
-    exec: ToolExecution,
-    standingPolicy: SandboxExecutionPolicy | undefined,
-  ): Promise<SandboxMode> => {
-    if (escalationModes.length === 0) {
-      throw new Error('sandbox_permissions is not available in this composition (no sandboxing executor to escalate)')
-    }
-    const effectiveMode = (standingPolicy as SandboxExecutionPolicy).mode
-    return approveEscalation(
-      { requestedMode: mode, justification, effectiveMode, subject: 'command' },
-      {
-        approver: ctx.get('approval'),
-        agent: exec.agent,
-        callId: exec.callId,
-        toolName: 'pwsh',
-        signal: exec.signal,
-      },
-    )
-  }
   /* jscpd:ignore-end */
 
   ctx.systemPrompt.section({
@@ -295,7 +211,7 @@ export function apply(ctx: Context, config: Config = {}): void {
               proc = await ctx.shell.execute({ ...spec, signal })
               return proc
             },
-            started => processOutcome(started, escalationModes),
+            processOutcome,
           )
           return {
             done: hooks.done,
@@ -351,7 +267,6 @@ export function apply(ctx: Context, config: Config = {}): void {
           timeoutMs,
           stdout: { text: '', truncated: false },
           stderr: { text: '', truncated: false },
-          ...spec.sandboxPolicy !== undefined ? { sandbox: { mode: spec.sandboxPolicy.mode, denied: false } } : {},
         }
       }
       if (view.status === 'running' || view.status === 'stopping') {
@@ -365,7 +280,7 @@ export function apply(ctx: Context, config: Config = {}): void {
           jobId: attached.id,
           timeoutMs,
           output: renderPwshJobRead(
-            ringDelta(read.chunks), read.lossy, read.job.output.spillPaths ?? [], attached.process()?.sandbox, escalationModes,
+            ringDelta(read.chunks), read.lossy, read.job.output.spillPaths ?? [],
           ),
         }
       }
@@ -385,7 +300,7 @@ export function apply(ctx: Context, config: Config = {}): void {
     /* jscpd:ignore-end */
     return defineTool({
       name: 'pwsh',
-      description: pwshDescription(escalationModes.length > 0),
+      description: pwshDescription(),
       /* jscpd:ignore-start -- deliberate mirror of dsh-tool-bash's parameter surface (pwsh-tool-and-executor Agent Note). */
       parameters: {
         description: {
@@ -405,18 +320,6 @@ export function apply(ctx: Context, config: Config = {}): void {
         workdir: { type: 'string', description: 'Working directory for this command. Defaults to the session workspace; a relative path is resolved against it.' },
         ...background ? {
           run_in_background: { type: 'boolean' as const, description: 'Run in the background and return a job id immediately (collect with job_output, stop with job_kill). No timeout applies.' },
-        } : {},
-        ...escalationModes.length > 0 ? {
-          sandbox_permissions: {
-            type: 'string' as const,
-            enum: [...escalationModes],
-            description: sandboxPermissionsDescription('command'),
-          },
-          justification: {
-            type: 'string' as const,
-            description: 'Required with sandbox_permissions: one sentence for the user explaining why this exact command needs the wider access. '
-              + 'Use the language of the user’s current request.',
-          },
         } : {},
       },
       /* jscpd:ignore-end */
@@ -475,16 +378,6 @@ export function apply(ctx: Context, config: Config = {}): void {
                     spillPath: { type: 'string' },
                   },
                 },
-                sandbox: {
-                  type: 'object',
-                  additionalProperties: false,
-                  properties: {
-                    mode: { type: 'string', required: true },
-                    denied: { type: 'boolean', required: true },
-                    enforcement: { type: 'string' },
-                    runnerFailed: { type: 'boolean' },
-                  },
-                },
               },
             },
           ],
@@ -496,7 +389,7 @@ export function apply(ctx: Context, config: Config = {}): void {
             ? `started background job ${value.jobId}`
             : value.kind === 'promoted'
               ? renderPwshPromoted(value)
-              : renderPwshResult(value as RenderablePwshResult, escalationModes),
+              : renderPwshResult(value as RenderablePwshResult),
         }],
         presentationMeta: (_args, value) => ({ cwd: value.cwd }),
       },
@@ -504,13 +397,6 @@ export function apply(ctx: Context, config: Config = {}): void {
       async execute(args: PwshToolArgs, exec) {
         validatePwshArgs(args)
         // Description is display metadata; workdir defaults to the caller's session.
-        const standingPolicy = resolveSandboxPolicy(exec)
-        const approvedMode = args.sandbox_permissions !== undefined && args.justification !== undefined
-          ? await approvePwshEscalation(args.sandbox_permissions, args.justification, exec, standingPolicy)
-          : undefined
-        const policy = approvedMode === undefined
-          ? standingPolicy
-          : { ...(standingPolicy as SandboxExecutionPolicy), mode: approvedMode }
         const cwd = exec.agent === undefined ? undefined : await ctx.workingDirectory.ensure(exec.agent, exec.signal)
         const workdir = resolveWorkdir(args.workdir, cwd)
         const request: ShellExecRequest = {
@@ -518,7 +404,6 @@ export function apply(ctx: Context, config: Config = {}): void {
           ...workdir !== undefined ? { workdir } : {},
           ...args.timeoutMs !== undefined ? { timeoutMs: args.timeoutMs } : {},
           dshEnv: ctx.shellEnv.collect(exec),
-          ...policy !== undefined ? { sandboxPolicy: policy } : {},
         }
         if (args.run_in_background === true) {
           // Undeclared keys are allowed, so schema omission also needs enforcement.

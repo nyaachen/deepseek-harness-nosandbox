@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-Use `dsh-fs` when an application needs consistent filesystem operations across host, confined, or remote execution environments. It lets consumers resolve stable file identities, map shared host files where supported, perform bounded text and byte reads, list directories, watch targets, and apply atomic text writes and literal edits. Version guards are optional, so a backend works without policy enforcement; callers can supply a guard to reject a mutation after the file changes. Choose `fs-local` or `fs-sandbox` for host execution. Model-facing filesystem tools are provided separately by `dsh-tool-fs`.
+Use `dsh-fs` when an application needs consistent filesystem operations across host or remote execution environments. It lets consumers resolve stable file identities, map shared host files where supported, perform bounded text and byte reads, list directories, watch targets, and apply atomic text writes and literal edits. Version guards are optional, so a backend works without policy enforcement; callers can supply a guard to reject a mutation after the file changes. Choose `fs-local` for host execution. Model-facing filesystem tools are provided separately by `dsh-tool-fs`.
 
 ## Table of Contents
 
@@ -29,7 +29,7 @@ You rarely load `dsh-fs` directly: you mount a backend that registers as `ctx.fs
 
 ### Choosing and mounting a backend
 
-Pick [`fs-local`](../fs-local/README.md) for ordinary host files or [`fs-sandbox`](../fs-sandbox/README.md) when a session's mutations must be confined to its workspace and temp roots. Mounting any backend populates `ctx.fs`; swapping backends changes nothing for the policy plugin, the tools, or the tool schemas. A composition that mounts no backend has no `ctx.fs` at all, and the tools fail at registration.
+Pick [`fs-local`](../fs-local/README.md) for ordinary host files. Mounting any backend populates `ctx.fs`; swapping backends changes nothing for the policy plugin, the tools, or the tool schemas. A composition that mounts no backend has no `ctx.fs` at all, and the tools fail at registration.
 
 ### What the service lets you do
 
@@ -52,7 +52,7 @@ This section explains the design decisions behind the contract and points at the
 The contract is built on one separation and three commitments:
 
 - **Contract over mechanism.** The service names what a storage layer can do — resolve, stat, read, list, watch, write, edit — and never how it stores bytes. Backends own target identity, execution-world coordinates, decoding, binary rejection, and atomicity.
-- **Policy stays off the base class.** Observed-state, read-before-edit, and version-guarded mutations are a plugin's job (`dsh-fs-observation-policy`), added by supplying the optional guard — so a sandboxed or remote backend inherits no model-facing observation policy.
+- **Policy stays off the base class.** Observed-state, read-before-edit, and version-guarded mutations are a plugin's job (`dsh-fs-observation-policy`), added by supplying the optional guard — so a remote backend inherits no model-facing observation policy.
 - **`editText` stays on the seam.** Version check, literal match, and atomic rewrite share one critical section, so error attribution and one-wins/one-stale concurrency stay correct; a remote backend may implement it as a native compare-and-edit.
 - **Bounds live at this seam.** `readBytes` requires `maxBytes` and fails with `FS_TOO_LARGE` rather than truncating, so no backend ever buffers an unbounded file. `readByteRange` is bounded by its window instead: a backend transfers at most the requested `length` beyond the prefix it skips, so the caller's cap on `length` is the guard.
 
@@ -88,7 +88,6 @@ Read these pages when the package-level contract is not enough. They move from t
 
 - [Filesystem subsystem](../../../docs/subsystems/filesystem.md) — exhaustive provider contract, policy events, and error taxonomy.
 - [fs-local](../fs-local/README.md) — the host-filesystem backend implementing this contract.
-- [fs-sandbox](../fs-sandbox/README.md) — the sandbox-enforcing backend implementing this contract.
 - [tool-fs](../tool-fs/README.md) — the model-facing tools that consume `ctx.fs`.
 - [fs-observation-policy](../fs-observation-policy/README.md) — the policy plugin that guards mutations through the `fs/*` events.
 - [Capability seams note](../../../.agents/notes/implemented/architecture/2026-06-13-capability-seams.md) — why the filesystem stack splits into contract, provider, policy, and tools.

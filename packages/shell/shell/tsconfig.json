@@ -16,9 +16,6 @@
     },
     {
       "path": "../../subprocess/subprocess"
-    },
-    {
-      "path": "../../sandbox/sandbox"
     }
   ]
 }

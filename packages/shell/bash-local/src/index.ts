@@ -5,7 +5,7 @@
  * explicit argv. This executor owns command defaulting, deadlines and cause
  * classification, the model-friendly terminal environment, and the model-facing
  * stdout/stderr merge for background reads. Execution policy belongs in
- * `tools/pre-execute` or a sandboxing executor.
+ * `tools/pre-execute`.
  * @module @deepseek-ai/dsh-bash-local
  */
 
@@ -139,10 +139,6 @@ export class LocalBashExecutor extends ShellExecutor {
       ...request.stdin !== undefined ? { stdin: request.stdin } : {},
       ...request.env !== undefined ? { env: request.env } : {},
       ...request.dshEnv !== undefined ? { dshEnv: request.dshEnv } : {},
-      // Carry a sandbox policy through verbatim: this executor never
-      // confines, so the field is inert here (the seam contract) — a
-      // sandboxing subclass overrides resolve() to stamp its default instead.
-      sandboxPolicy: request.sandboxPolicy,
     }
   }
 

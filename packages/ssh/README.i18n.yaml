@@ -3,20 +3,20 @@
 # After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write packages/ssh/README.md
 /:
-  en: cc733bef2f8faa24
-  zh: 5af0a04d349066ce
+  en: c36ef60c1cade089
+  zh: d9b6fd71bc6b07cf
 /ssh-posix-remote-execution-providers:
   en: b0cf352e20ea98f7
   zh: 2cd695d6e0710822
 /ssh-posix-remote-execution-providers/summary:
-  en: 0f6b92200d01f322
-  zh: f6da6f842ccd7f9e
+  en: 848ecd773b284b4f
+  zh: f0dfc3072d7eb7b2
 /ssh-posix-remote-execution-providers/table-of-contents:
   en: 09848f4d056e4fc1
   zh: 8df6139cff0288f6
 /ssh-posix-remote-execution-providers/packages:
-  en: 9834da4173b14e73
-  zh: 3061df591af18dbb
+  en: 96fcdb1222142f65
+  zh: 8a511fdacefa99c6
 /ssh-posix-remote-execution-providers/related-documentation:
   en: 7ebd72bec519e550
   zh: 20023cb415ddae24

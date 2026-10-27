@@ -234,46 +234,22 @@
     - id: subprocess
       name: '@deepseek-ai/dsh-subprocess-local'
 
-    # Every shipped CLI mode starts with the same file-effect boundary.
-    # The environment remains an explicit deployment override; otherwise fresh
-    # sessions pin workspace-write + ask through the permission service below.
-    - id: sandbox
-      name: '@deepseek-ai/dsh-sandbox-local'
-
-    - id: sandbox-policy
-      name: '@deepseek-ai/dsh-sandbox-policy'
-      config:
-        mode: !!js process.env.DSH_PERMISSION_MODE ?? 'workspace-write'
-        workspaceRoot: !!js process.cwd()
-
-    - id: bash-sandbox
-      name: '@deepseek-ai/dsh-bash-sandbox'
+    # Commands run unconfined: this deployment mounts no process or file
+    # sandbox, so file effects are unrestricted and approval is the only gate.
+    - id: bash-local
+      name: '@deepseek-ai/dsh-bash-local'
       disabled: !!js process.platform === 'win32'
       config:
         timeoutMs: 60000
 
-    - id: pwsh-sandbox
-      name: '@deepseek-ai/dsh-pwsh-sandbox'
+    - id: pwsh-local
+      name: '@deepseek-ai/dsh-pwsh-local'
       disabled: !!js process.platform !== 'win32'
 
     - id: approval
       name: '@deepseek-ai/dsh-user-approval'
       config:
-        policy: !!js "(process.env.DSH_PERMISSION_MODE ?? 'workspace-write') === 'danger-full-access' ? 'never' : 'ask'"
-
-    - id: permission
-      name: '@deepseek-ai/dsh-permission-presets'
-      config:
-        presets:
-          read-only:
-            sandbox: read-only
-            approval: ask
-          workspace-write:
-            sandbox: workspace-write
-            approval: ask
-          danger-full-access:
-            sandbox: danger-full-access
-            approval: never
+        policy: ask
 
     - id: shell-env
       name: '@deepseek-ai/dsh-shell-env'
@@ -513,10 +489,10 @@
       config:
         agents: []
 
-    # The sandboxed filesystem provider. `cwd` defaults to `process.cwd()`; an
+    # The local filesystem provider. `cwd` defaults to `process.cwd()`; an
     # overlay can pin another workspace.
-    - id: fs-sandbox
-      name: '@deepseek-ai/dsh-fs-sandbox'
+    - id: fs-local
+      name: '@deepseek-ai/dsh-fs-local'
 
     # The native DeepSeek adapter. No key or endpoint is inlined: both resolve per
     # request from the `llm-deepseek:` settings section over this entry, with the

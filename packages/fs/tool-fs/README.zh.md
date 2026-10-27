@@ -25,7 +25,7 @@ kind: "package-reference"
 <a id="use-this-package"></a>
 ## 使用本包
 
-相对路径使用 Session 的当前工作目录。切换目录会影响后续读取和修改，但不会改变沙箱权限根目录。成功结果返回 `fs.processPath` 提供的规范化绝对路径，根调用结果元数据保留该操作发生时的路径，用于回放和导航。
+相对路径使用 Session 的当前工作目录，因此切换目录会影响后续读取和修改。成功结果返回 `fs.processPath` 提供的规范化绝对路径，根调用结果元数据保留该操作发生时的路径，用于回放和导航。
 
 在 `ctx.fs` 后端之后挂载工具，并在需要先读后写/编辑行为时挂载策略插件。模型随后获得带行号的读取、原子的写入与编辑，以及——挂载附件存储时——图像读取；每个结果都有上限，失败携带稳定错误码与恢复指令。
 
@@ -71,11 +71,11 @@ kind: "package-reference"
 
 挂载 `fs-observation-policy` 且关闭 `read` 时，`write` 仍可创建文件，成功写入或编辑会记录本会话后续修改所需的版本。未观察过的已有文件仍受保护；关闭 `read` 不会放宽策略。其他文件系统读取方必须发出 `fs/observed`，已有文件才会成为已观察状态。
 
-### 策略与沙箱行为
+### 策略行为
 
 `read` 与 `read_image` 的路径授权完全由 `ctx.fs` 负责；媒体类型声明和文件签名只决定 `read_image` 是否接受该后端返回的字节。
 
-挂载策略插件后，`write` 与 `edit` 从 `fs/*` 意图槽位取得防护，因此未读目标或陈旧观察会以 `FS_NOT_OBSERVED` 或 `FS_STALE_VERSION` 及恢复指令失败。使用施加沙箱限制的后端（`fs-sandbox`）时，`write`/`edit` 还会公开 `sandbox_permissions` 与 `justification`；被拒绝的变更返回 `[sandbox: file access denied under <mode> mode]` 标记与同轮次升级提示，获批的重试可以在该次调用中加盖严格更宽的模式。理由字段提示模型使用用户当前提问的语言。
+挂载策略插件后，`write` 与 `edit` 从 `fs/*` 意图槽位取得防护，因此未读目标或陈旧观察会以 `FS_NOT_OBSERVED` 或 `FS_STALE_VERSION` 及恢复指令失败。
 
 ### 失败与恢复
 
@@ -105,7 +105,6 @@ kind: "package-reference"
 | [`src/write.ts`](src/write.ts) | `write` 执行器：意图 waterfall、原子写入、观察 |
 | [`src/edit.ts`](src/edit.ts) | `edit` 执行器：意图 waterfall、字面量编辑、观察 |
 | [`src/read-render.ts`](src/read-render.ts) | 不依赖 Cordis 的窗口构建与信封格式化 |
-| [`src/sandbox.ts`](src/sandbox.ts) | `write`/`edit` 共享的升权 API：策略解析与拒绝标记映射 |
 | [`src/error.ts`](src/error.ts) | 防护变更失败的稳定模型侧诊断 |
 | [`src/mutation-result.ts`](src/mutation-result.ts) | 成功变更的观察记录与规范化结果路径 |
 
@@ -129,7 +128,6 @@ kind: "package-reference"
 - [文件系统子系统](../../../docs/subsystems/filesystem.zh.md)——穷尽式提供方约定、策略事件与错误分类体系。
 - [dsh-fs](../fs/README.zh.md)——这些工具消费的 `ctx.fs` 约定。
 - [fs-local](../fs-local/README.zh.md)——这些工具运行于其上的宿主文件系统后端。
-- [fs-sandbox](../fs-sandbox/README.zh.md)——添加升权字段的沙箱强制后端。
 - [fs-observation-policy](../fs-observation-policy/README.zh.md)——通过 `fs/*` 事件防护变更的策略插件。
 - [生成工具目录](../../../docs/tool-catalog.zh.md#deepseek-aidsh-tool-fs)——本包注册的穷尽式 schema。
 

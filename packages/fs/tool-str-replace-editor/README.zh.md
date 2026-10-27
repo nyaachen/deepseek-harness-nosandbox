@@ -9,7 +9,7 @@ kind: "package-reference"
 
 ## 概述
 
-`dsh-tool-str-replace-editor` 提供基于 `ctx.fs` 的独立面向模型 `str_replace_editor` 工具：`view` 显示带行号的文件内容或浅层目录列表，`create` 创建新文件，`str_replace` 应用唯一的字面量替换，`insert` 在选定的边界处插入行。它可以与持久 Bash、一次性 Bash、沙箱 Bash 或其他终端接口组合。修改操作遵守与 fs 家族其余部分相同的编辑前读取策略与沙箱围栏，具体由所挂载的后端与策略插件强制执行。当部署需要 Claude Code 风格、使用绝对路径的单一编辑器工具时选择它；`dsh-tool-fs` 包提供替代的 `read`/`write`/`edit` 套件。
+`dsh-tool-str-replace-editor` 提供基于 `ctx.fs` 的独立面向模型 `str_replace_editor` 工具：`view` 显示带行号的文件内容或浅层目录列表，`create` 创建新文件，`str_replace` 应用唯一的字面量替换，`insert` 在选定的边界处插入行。它可以与持久 Bash、一次性 Bash 或其他终端接口组合。修改操作遵守与 fs 家族其余部分相同的编辑前读取策略，具体由所挂载的后端与策略插件强制执行。当部署需要 Claude Code 风格、使用绝对路径的单一编辑器工具时选择它；`dsh-tool-fs` 包提供替代的 `read`/`write`/`edit` 套件。
 
 ## 目录
 
@@ -52,7 +52,7 @@ kind: "package-reference"
 
 ### 失败与恢复
 
-`view`、`str_replace` 或 `insert` 发生元数据未命中时，工具会在返回 `FS_NOT_FOUND` 前记录确认缺失，因此后续 `create` 可以通过已挂载策略的防护创建流程恢复外部删除的路径；缺失状态绝不会授权 `str_replace` 或 `insert`。防护变更继承策略插件的错误码与恢复指令——`FS_NOT_OBSERVED`（先读取文件再重试）、`FS_STALE_VERSION`（先重新读取再重试）——沙箱拒绝则表现为 `[sandbox: file access denied under <mode> mode]` 标记。路径必须是绝对路径；相对路径会被拒绝并给出提示。
+`view`、`str_replace` 或 `insert` 发生元数据未命中时，工具会在返回 `FS_NOT_FOUND` 前记录确认缺失，因此后续 `create` 可以通过已挂载策略的防护创建流程恢复外部删除的路径；缺失状态绝不会授权 `str_replace` 或 `insert`。防护变更继承策略插件的错误码与恢复指令——`FS_NOT_OBSERVED`（先读取文件再重试）、`FS_STALE_VERSION`（先重新读取再重试）。路径必须是绝对路径；相对路径会被拒绝并给出提示。
 
 -----
 
@@ -66,7 +66,7 @@ kind: "package-reference"
 
 ### 设计理念
 
-该工具是基于 `ctx.fs` 的单一 schema、四个命令。修改操作绝不带着自己的假设直接触碰提供方：每个操作都运行 `fs/write-intent` 或 `fs/edit-intent` waterfall（瀑布式事件）以取得策略插件的防护，在已挂载的 `ctx.fs` 实施沙箱限制时解析每次调用的沙箱策略，并把强制执行委托给提供方。`str_replace` 与 `insert` 还会重新读取文件，并在没有策略插件提供防护时把观察到的版本作为比较并交换的基础。
+该工具是基于 `ctx.fs` 的单一 schema、四个命令。修改操作绝不带着自己的假设直接触碰提供方：每个操作都运行 `fs/write-intent` 或 `fs/edit-intent` waterfall（瀑布式事件）以取得策略插件的防护，并把强制执行委托给提供方。`str_replace` 与 `insert` 还会重新读取文件，并在没有策略插件提供防护时把观察到的版本作为比较并交换的基础。
 
 ### 源码地图
 
@@ -91,7 +91,6 @@ kind: "package-reference"
 - [dsh-fs](../fs/README.zh.md)——本工具消费的 `ctx.fs` 约定。
 - [tool-fs](../tool-fs/README.zh.md)——替代的 `read`/`write`/`edit` 工具套件。
 - [fs-observation-policy](../fs-observation-policy/README.zh.md)——通过 `fs/*` 事件防护变更的策略插件。
-- [fs-sandbox](../fs-sandbox/README.zh.md)——围栏变更的沙箱强制后端。
 - [生成工具目录](../../../docs/tool-catalog.zh.md#deepseek-aidsh-tool-str-replace-editor)——本包注册的穷尽式 schema。
 
 -----
@@ -136,7 +135,7 @@ kind: "package-reference"
 
 - **操作面向 UTF-8 文本**——不支持二进制文件。
 - **`str_replace` 刻意拒绝零匹配或多匹配**——它没有 `replace_all` 参数。
-- **每个修改操作都会经过已挂载的策略与沙箱**——`fs/write-intent` 或 `fs/edit-intent` 解析当前会话的沙箱策略，并把强制执行委托给已挂载的文件系统与策略插件，因此未挂载它们的部署会得到无条件变更。
+- **每个修改操作都会经过已挂载的策略**——`fs/write-intent` 或 `fs/edit-intent` 提供防护，并把强制执行委托给已挂载的文件系统与策略插件，因此未挂载它们的部署会得到无条件变更。
 
 <a id="dev-note"></a>
 ### 开发备注

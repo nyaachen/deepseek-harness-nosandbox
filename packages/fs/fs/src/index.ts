@@ -9,7 +9,6 @@
  */
 
 import { Context, Service } from '@deepseek-ai/cordis'
-import type { SandboxExecutionPolicy, SandboxMode } from '@deepseek-ai/dsh-sandbox'
 import { FsError } from './types.ts'
 import type {
   FsDirEntry,
@@ -102,22 +101,6 @@ export abstract class FileSystem extends Service {
     void changed
     signal.throwIfAborted()
     return Promise.reject(new FsError('Filesystem watching is not supported by this provider.', 'FS_IO_ERROR'))
-  }
-
-  /**
-   * The sandbox mode this backend enforces on mutations BY DEFAULT, or
-   * `undefined` when it does not confine at all — the capability fact the tool
-   * layer reads to advertise the escalation fields honestly (mirrors
-   * `ShellExecutor.sandboxMode`). The base class and the bare local backend
-   * report `undefined`; a sandboxing backend (`@deepseek-ai/dsh-fs-sandbox`)
-   * overrides it with the deployment default. A session override may make the
-   * effective mode narrower or wider, so strict escalation widening is checked
-   * per call rather than encoded in this default-relative fact.
-   * @returns the configured default mode of a sandboxing backend; `undefined`
-   *   for a backend that never confines.
-   */
-  get sandboxMode(): SandboxMode | undefined {
-    return undefined
   }
 
   /**
@@ -258,9 +241,6 @@ export abstract class FileSystem extends Service {
    * @param content - the full new file content.
    * @param expected - the write intent guarding the write; omit for unconditional.
    * @param signal - aborts before atomic publication takes effect.
-   * @param sandboxPolicy - the per-call mode and workspace root this write
-   *   runs under; a sandboxing backend fences the write by it, the bare backend
-   *   ignores it. Omit to leave the backend its own default.
    * @returns the outcome, including the version the write produced.
    */
   abstract writeText(
@@ -268,7 +248,6 @@ export abstract class FileSystem extends Service {
     content: string,
     expected?: FsWriteIntent,
     signal?: AbortSignal,
-    sandboxPolicy?: SandboxExecutionPolicy,
   ): Promise<FsWriteOutcome>
 
   /**
@@ -279,9 +258,6 @@ export abstract class FileSystem extends Service {
    * @param edit - the literal search/replace request.
    * @param expected - the version guard; omit for an unconditional edit.
    * @param signal - aborts before atomic publication takes effect.
-   * @param sandboxPolicy - the per-call mode and workspace root this edit runs
-   *   under; a sandboxing backend fences the edit by it, the bare backend
-   *   ignores it. Omit to leave the backend its own default.
    * @returns the outcome, including the version the edit produced.
    */
   abstract editText(
@@ -289,7 +265,6 @@ export abstract class FileSystem extends Service {
     edit: FsEditRequest,
     expected?: { version: FsVersion },
     signal?: AbortSignal,
-    sandboxPolicy?: SandboxExecutionPolicy,
   ): Promise<FsEditOutcome>
 }
 

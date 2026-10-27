@@ -6,7 +6,6 @@
 
 import { Context, Service } from '@deepseek-ai/cordis'
 import type { PtcRunRequest, PtcRunResult, PtcRunSpec } from './types.ts'
-import type { SandboxMode } from '@deepseek-ai/dsh-sandbox'
 
 export type {
   PtcBindingErrorClass,
@@ -17,7 +16,6 @@ export type {
   PtcRunRequest,
   PtcRunResult,
   PtcRunSpec,
-  PtcRunSandbox,
 } from './types.ts'
 
 /**
@@ -135,9 +133,6 @@ export abstract class PtcRuntime extends Service {
 
   /** Provider-owned program usage guidance for consumers to present alongside the source language. */
   get executionInstructions(): string { return '' }
-
-  /** Deployment file-policy mode, or undefined for a provider without confinement support. */
-  get sandboxMode(): SandboxMode | undefined { return undefined }
 
   /** Configured numeric elapsed-time defaults and cap, or undefined when per-call overrides are unsupported. */
   get timeout(): { defaultMs: number; maxMs: number } | undefined { return undefined }

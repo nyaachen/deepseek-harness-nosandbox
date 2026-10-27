@@ -3,20 +3,20 @@
 # After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write packages/shell/bash-local/README.md
 /:
-  en: f70a1e0bb1e0d56d
-  zh: 927e75bc75573410
+  en: 4978e828e5e11f75
+  zh: 9e23b2a77195d303
 /deepseek-ai-dsh-bash-local:
   en: 49a2f5ded22f098e
   zh: 5d75eea29ac486a0
 /deepseek-ai-dsh-bash-local/summary:
-  en: 518e199306e5cc7d
-  zh: ccfb150038dc4afa
+  en: 32d55a82867bd078
+  zh: 96b78515d8c7451c
 /deepseek-ai-dsh-bash-local/table-of-contents:
   en: d152484eb41ac6b4
   zh: 09388d293f9be9cb
 /deepseek-ai-dsh-bash-local/use-this-package:
-  en: 95ae7843275778ca
-  zh: 43b5069075a99625
+  en: 8f12d149794e9435
+  zh: 56e78fdff018a9ee
 /deepseek-ai-dsh-bash-local/use-this-package/minimal-configuration:
   en: eaf71726aaf5333d
   zh: b658e8d0b77db826
@@ -45,8 +45,8 @@
   en: dd0e8349896efbff
   zh: 15cd675f9806468e
 /deepseek-ai-dsh-bash-local/further-exploration:
-  en: 02adacff32fe6aaa
-  zh: 985d507298f0d113
+  en: 6e598039b8c72565
+  zh: 70c68d9c2b81518b
 /deepseek-ai-dsh-bash-local/model-experience:
   en: 6f1b2f8c867cac58
   zh: 36ce16f256972e88
@@ -54,8 +54,8 @@
   en: 40294c1c31b74824
   zh: 788a4799b1d65a8b
 /deepseek-ai-dsh-bash-local/known-limitations-and-deferred-work:
-  en: f1f98b9ebab7e6d2
-  zh: 803cc5e021de530f
+  en: 5d39cfdefa095b87
+  zh: d68a06463a595ad9
 /deepseek-ai-dsh-bash-local/known-limitations-and-deferred-work/dev-note:
   en: e67f633dc6fe7773
   zh: 3bb0c20c93f16f98

@@ -359,8 +359,8 @@ describe('the shipped Web composition', () => {
       expect(ctx.commands.find(handle.agent, 'goal')).toBeUndefined()
       // serviceFor reports preset-owned providers; unisolated consumers inherit the host fs.
       expect(ctx.agentPresets.serviceFor(handle.agent, 'fs')).toBeUndefined()
-      expect(ctx.get('fs')?.sandboxMode).toBeDefined()
-      expect(handle.agent.ctx.get('fs')?.sandboxMode).toBe(ctx.get('fs')?.sandboxMode)
+      expect(ctx.get('fs')).toBeDefined()
+      expect(handle.agent.ctx.get('fs')).toBe(ctx.get('fs'))
       expect(ctx.agentPresets.serviceFor(handle.agent, 'compaction')).toBeDefined()
       expect(handle.agent.ctx.get('compaction')).toBeUndefined()
       expect(ctx.commands.find(handle.agent, 'compact')).toBeDefined()

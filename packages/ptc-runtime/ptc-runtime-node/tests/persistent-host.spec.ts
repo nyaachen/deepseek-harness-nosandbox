@@ -1,8 +1,6 @@
 import { Duplex, PassThrough } from 'node:stream'
 import { setImmediate } from 'node:timers/promises'
 import { Context } from '@deepseek-ai/cordis'
-import { SessionId } from '@deepseek-ai/dsh-session'
-import { setSandboxMode } from '@deepseek-ai/dsh-sandbox-policy'
 import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import type { PtcBindingFunction, PtcRunRequest } from '@deepseek-ai/dsh-ptc-runtime'
 import type { SubprocessHandle, SubprocessOutcome } from '@deepseek-ai/dsh-subprocess'
@@ -93,117 +91,6 @@ async function setup(config: Config = {}) {
 function frame(payload: unknown, id = 1) { return { id, payload } }
 function call(id = 1, args: unknown = encodePtcJsonWire(null)) { return frame({ type: 'call', id, global: 'tools', name: 'test', args }) }
 const bound: PtcRunRequest = { ...request, bindings: [{ global: 'tools', functions: { test: async () => 42 } }] }
-
-it.each(['per-call', 'persistent-in-memory'] as const)('cancels a %s call when its Session policy changes before process launch', async (executionMode) => {
-  const h = await setup({ executionMode })
-  const session = h.ctx.sessions.create(SessionId('policy-admission'))
-  const policy = h.ctx.sandboxPolicy.resolve({ session })
-  expect(policy.mode).toBe('danger-full-access')
-  h.receive((message) => {
-    if (typeof message !== 'object' || message === null || !('type' in message)) return
-    const done = { type: 'done', value: encodePtcJsonWire(1) }
-    if (message.type === 'run') h.emit(frame(done))
-    else if (message.type === 'boot') h.emit(done)
-  })
-
-  const pending = h.start({
-    program: executionMode === 'per-call' ? 'return 1' : '1',
-    bindings: [],
-    stateOwner: {},
-    sandboxPolicy: policy,
-  })
-  setSandboxMode(session, 'read-only')
-
-  const result = await pending
-  expect(h.ctx.sandboxPolicy.resolve({ session }).mode).toBe('read-only')
-  expect(result).toMatchObject({ error: { kind: 'abort' } })
-  expect(h.spawn).not.toHaveBeenCalled()
-})
-
-it.each(['per-call', 'persistent-in-memory'] as const)('keeps an approved wider %s call when the standing mode is unchanged', async (executionMode) => {
-  const h = await setup({ executionMode })
-  const session = h.ctx.sessions.create(SessionId('temporary-admission'))
-  setSandboxMode(session, 'read-only')
-  const standing = h.ctx.sandboxPolicy.resolve({ session })
-  h.receive((message) => {
-    if (typeof message !== 'object' || message === null || !('type' in message)) return
-    const done = { type: 'done', value: encodePtcJsonWire(1) }
-    if (message.type === 'run') h.emit(frame(done))
-    else if (message.type === 'boot') h.emit(done)
-  })
-  const pending = h.start({
-    program: executionMode === 'per-call' ? 'return 1' : '1',
-    bindings: [],
-    sandboxPolicy: { ...standing, mode: 'danger-full-access' },
-  })
-  setSandboxMode(session, 'read-only')
-  expect(await pending).toMatchObject({ value: 1, sandbox: { mode: 'danger-full-access' } })
-  expect(h.spawn).toHaveBeenCalledOnce()
-  expect(h.ctx.sandboxPolicy.resolve({ session }).mode).toBe('read-only')
-})
-
-it.each(['per-call', 'persistent-in-memory'] as const)('keeps a %s call canceled when policy changes back during earlier cleanup', async (executionMode) => {
-  const h = await setup({ executionMode })
-  const session = h.ctx.sessions.create(SessionId('waiting-admission'))
-  const booted = Promise.withResolvers<undefined>()
-  const cleaning = Promise.withResolvers<undefined>()
-  const cleanup = Promise.withResolvers<boolean>()
-  h.receive((message) => {
-    if (typeof message === 'object' && message !== null && 'type' in message
-      && (message.type === 'run' || message.type === 'boot')) booted.resolve(undefined)
-  })
-  h.waitForExit.mockImplementation(() => { cleaning.resolve(undefined); return cleanup.promise })
-  const first = h.start({ ...request, sandboxPolicy: h.ctx.sandboxPolicy.resolve({ session }) })
-  let waiting: ReturnType<typeof h.start> | undefined
-  try {
-    await booted.promise
-    setSandboxMode(session, 'read-only')
-    await cleaning.promise
-    waiting = h.start({ ...request, stateOwner: {}, sandboxPolicy: h.ctx.sandboxPolicy.resolve({ session }) }, NO_INITIAL_FRAME)
-    setSandboxMode(session, 'danger-full-access')
-    setSandboxMode(session, 'read-only')
-    expect(h.spawn).toHaveBeenCalledOnce()
-    cleanup.resolve(true)
-    expect((await first).error?.kind).toBe('abort')
-    expect((await waiting).error?.kind).toBe('abort')
-    expect(h.spawn).toHaveBeenCalledOnce()
-  } finally {
-    cleanup.resolve(true)
-    await first
-    await waiting
-  }
-})
-
-it('rejects a retained call when its provider unloads during earlier policy cleanup', async () => {
-  const h = await setup()
-  const session = h.ctx.sessions.create(SessionId('unloading-admission'))
-  h.onBoot(() => { h.emit(frame({ type: 'done' })) })
-  await h.start({ ...request, sandboxPolicy: h.ctx.sandboxPolicy.resolve({ session }) })
-  const cleaning = Promise.withResolvers<undefined>()
-  const cleanup = Promise.withResolvers<boolean>()
-  h.waitForExit.mockImplementation(() => { cleaning.resolve(undefined); return cleanup.promise })
-  setSandboxMode(session, 'read-only')
-  await cleaning.promise
-  const pending = h.runtime.run(h.runtime.resolve({
-    ...request, stateOwner: {}, sandboxPolicy: h.ctx.sandboxPolicy.resolve({ session }),
-  }))
-  const rejected = expect(pending).rejects.toThrow('persistent PTC: run after disposal')
-  const closing = h.fiber.dispose()
-  try {
-    await vi.waitFor(() => {
-      expect(() => h.runtime.resolve(request)).toThrow('persistent PTC: resolve after disposal')
-    })
-    expect(h.spawn).toHaveBeenCalledOnce()
-    cleanup.resolve(true)
-    await rejected
-    await closing
-    expect(h.ctx.get('ptcRuntime')).toBeUndefined()
-    expect(h.spawn).toHaveBeenCalledOnce()
-  } finally {
-    cleanup.resolve(true)
-    await Promise.allSettled([pending, rejected, closing])
-  }
-})
 
 describe('persistent PTC host protocol', () => {
   it.each([
@@ -544,40 +431,6 @@ it('reserves the owner while parse-output overflow releases its environment', as
     stopped.resolve(true)
     expect((await pending).error?.kind).toBe('output-limit')
   } finally { stopped.resolve(true); await pending }
-})
-
-it.each([true, false])('classifies confined process spawn failure with runner evidence %s', async (runnerFailure) => {
-  const h = await setup()
-  const runner = '/missing-ptc-sandbox-runner'
-  const confine = vi.spyOn(h.ctx.sandbox, 'confine').mockResolvedValue({
-    argv: [runner], enforcement: 'partial', denialSignatures: [], runnerFailureRules: [],
-  })
-  h.spawn.mockImplementation(() => {
-    throw Object.assign(new Error('spawn failed'), { code: 'ENOENT', path: runnerFailure ? runner : '/other', syscall: `spawn ${runner}` })
-  })
-  try {
-    const result = await h.start({ ...request, sandboxPolicy: { mode: 'read-only', workspaceRoot: process.cwd() } }, NO_INITIAL_FRAME)
-    expect(result.error?.kind).toBe(runnerFailure ? 'sandbox-unavailable' : 'worker-exit')
-    expect(result.sandbox?.enforcement).toBe('partial')
-  } finally { confine.mockRestore() }
-})
-
-it('reports a sandbox runner refusal before the REPL is ready', async () => {
-  const h = await setup()
-  const confine = vi.spyOn(h.ctx.sandbox, 'confine').mockResolvedValue({
-    argv: ['sandbox-runner'], enforcement: 'full', denialSignatures: [],
-    runnerFailureRules: [{ allowedExitCodes: [127], fatalSignatures: ['sandbox runner rejected'] }],
-  })
-  const pending = h.start({ ...request, sandboxPolicy: { mode: 'read-only', workspaceRoot: process.cwd() } }, NO_INITIAL_FRAME)
-  try {
-    await vi.waitFor(() => { expect(h.spawn).toHaveBeenCalledOnce() })
-    h.stdout.end()
-    h.stderr.end('sandbox runner rejected the file policy')
-    h.direct.resolve({ exitCode: 127, signal: null })
-    const result = await pending
-    expect(result.error?.kind).toBe('sandbox-unavailable')
-    expect(result.sandbox).toEqual({ mode: 'read-only', denied: false, enforcement: 'full' })
-  } finally { h.direct.resolve({ exitCode: 127, signal: null }); await pending; confine.mockRestore() }
 })
 
 it('releases a confirmed exited process even when its output pipe did not drain', async () => {

@@ -9,7 +9,7 @@ kind: "package-library"
 
 ## 概述
 
-远端机器无须安装 Node 或 npm 包即可运行 SSH helper。每个发行包都包含可执行文件、原生资源和完整性元数据。这个私有载体通过既有 SSH 提供方支持托管进程、终端、沙箱和内嵌 PTC worker。项目命令仍使用远端机器自身的开发工具。
+远端机器无须安装 Node 或 npm 包即可运行 SSH helper。每个发行包都包含可执行文件、原生资源和完整性元数据。这个私有载体通过既有 SSH 提供方支持托管进程、终端和内嵌 PTC worker。项目命令仍使用远端机器自身的开发工具。
 
 ## 目录
 
@@ -92,7 +92,7 @@ None，因为这个私有进程载体不注册面向模型的工具或提示内�
 
 <a id="known-limitations-and-deferred-work"></a>
 
-- 构建目标不包含 Windows 和基于 musl 的 Linux。沙箱可用性仍取决于目标内核和系统工具。
+- 构建目标不包含 Windows 和基于 musl 的 Linux。
 - 自动下载、部署、更新和连接 UI 独立于发行包生产。
 - 可执行文件接受私有 worker 调用，不接受任意 Node CLI 参数。项目中的 `node` 命令和嵌套 JavaScript 子进程需要单独安装 Node。
 

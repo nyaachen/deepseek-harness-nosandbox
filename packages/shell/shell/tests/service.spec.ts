@@ -21,7 +21,6 @@ class StubExecutor extends ShellExecutor {
       onExpiry: request.onExpiry ?? 'kill',
       stdoutMaxBytes: request.stdoutMaxBytes ?? 64_000,
       ...request.signal ? { signal: request.signal } : {},
-      sandboxPolicy: request.sandboxPolicy,
     }
   }
 
@@ -57,7 +56,7 @@ describe('ShellExecutor service seam', () => {
     const ctx = new Context()
     await ctx.plugin(StubExecutor)
     const spec = ctx.shell.resolve({ command: 'echo hi' })
-    expect(spec).toEqual({ command: 'echo hi', workdir: '/stub', timeoutMs: 1000, onExpiry: 'kill', stdoutMaxBytes: 64_000, sandboxPolicy: undefined })
+    expect(spec).toEqual({ command: 'echo hi', workdir: '/stub', timeoutMs: 1000, onExpiry: 'kill', stdoutMaxBytes: 64_000 })
 
     // One execution, two views: the foreground result projection…
     const ex = (await ctx.shell.execute(spec))
@@ -72,12 +71,6 @@ describe('ShellExecutor service seam', () => {
     expect(proc.kill()).toBe(true)
     expect(proc.kill()).toBe(false) // already settled → no-op
     await proc.done
-  })
-
-  it('reports no default sandbox mode from the task-free base seam', async () => {
-    const ctx = new Context()
-    await ctx.plugin(StubExecutor)
-    expect(ctx.shell.sandboxMode).toBeUndefined()
   })
 
   it('loading a second implementation throws (one bash service per context — cordis standard)', async () => {
