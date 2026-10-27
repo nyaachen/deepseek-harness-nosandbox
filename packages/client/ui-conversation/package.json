@@ -87,7 +87,7 @@
     "@lexical/headless": "^0.49.0",
     "react-dom": "^18.2.0",
     "zod": "4.4.3",
-    "lexical": "^0.49.0",
+    "lexical": "^0.51.0",
     "clsx": "^2.0.0",
     "@lexical/utils": "^0.49.0",
     "@lexical/text": "^0.49.0",
